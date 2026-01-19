@@ -39,40 +39,40 @@ Both implementations return identical x402-compliant 402 responses.
 
 ## Why Cross-Chain?
 
-Different networks offer different advantages. Supporting both lets users pay with their preferred assets:
+Different networks offer different advantages. Supporting multiple chains lets users pay with their preferred assets:
 
-| Feature | EVM (Base) | Stacks |
-|---------|------------|--------|
-| Settlement | ~2 sec | ~5 sec |
-| Tokens | USDC | STX, sBTC, USDCx |
-| Finality | L2 sequencer | Bitcoin-anchored |
-| Gasless | Paymasters | Sponsor relay |
-| Unique value | Fast, cheap USDC | Programmable BTC (sBTC) |
+| Feature | EVM (Base) | Solana | Stacks |
+|---------|------------|--------|--------|
+| Settlement | ~2 sec | ~400 ms | ~5 sec |
+| Tokens | USDC | USDC, SOL | STX, sBTC, USDCx |
+| Finality | L2 sequencer | PoH consensus | Bitcoin-anchored |
+| Gasless | Paymasters | Fee payers | Sponsor relay |
+| Unique value | Fast, cheap USDC | Ultra-fast, high throughput | Programmable BTC (sBTC) |
 
-**For AI agents**: Both networks support gasless transactions - Base via paymasters, Stacks via [sponsor relay](https://github.com/aibtcdev/x402-sponsor-relay).
+**For AI agents**: All networks support gasless transactions - Base via paymasters, Solana via fee payers, Stacks via [sponsor relay](https://github.com/aibtcdev/x402-sponsor-relay).
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                           Your API                               │
-│  ┌───────────────────┐                ┌───────────────────┐      │
-│  │   EVM Middleware  │                │  Stacks Middleware │      │
-│  │  (@x402/express)  │                │   (x402-stacks)    │      │
-│  └─────────┬─────────┘                └─────────┬─────────┘      │
-└────────────┼────────────────────────────────────┼────────────────┘
-             │                                    │
-             ▼                                    ▼
-┌────────────────────────┐        ┌─────────────────────────────┐
-│    EVM Facilitator     │        │     Stacks Facilitator      │
-│  x402.org/facilitator  │        │ facilitator.stacksx402.com  │
-└────────────────────────┘        └─────────────────────────────┘
-             │                                    │
-             ▼                                    ▼
-┌────────────────────────┐        ┌─────────────────────────────┐
-│     Base Network       │        │      Stacks Network         │
-│        (USDC)          │        │    (STX / sBTC / USDCx)     │
-└────────────────────────┘        └─────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                                        Your API                                         │
+│  ┌───────────────────┐    ┌────────────────────┐    ┌───────────────────┐              │
+│  │   EVM Middleware  │    │  Solana Middleware │    │  Stacks Middleware │              │
+│  │  (@x402/express)  │    │   (x402-solana)    │    │   (x402-stacks)    │              │
+│  └─────────┬─────────┘    └─────────┬──────────┘    └─────────┬─────────┘              │
+└────────────┼────────────────────────┼─────────────────────────┼────────────────────────┘
+             │                        │                         │
+             ▼                        ▼                         ▼
+┌────────────────────────┐  ┌────────────────────────┐  ┌─────────────────────────────┐
+│    EVM Facilitator     │  │   Solana Facilitator   │  │     Stacks Facilitator      │
+│  x402.org/facilitator  │  │  x402.org/facilitator  │  │ facilitator.stacksx402.com  │
+└────────────────────────┘  └────────────────────────┘  └─────────────────────────────┘
+             │                        │                         │
+             ▼                        ▼                         ▼
+┌────────────────────────┐  ┌────────────────────────┐  ┌─────────────────────────────┐
+│     Base Network       │  │    Solana Network      │  │      Stacks Network         │
+│        (USDC)          │  │     (USDC / SOL)       │  │    (STX / sBTC / USDCx)     │
+└────────────────────────┘  └────────────────────────┘  └─────────────────────────────┘
 ```
 
 ## Adding Stacks to Your x402 App
@@ -264,7 +264,8 @@ See: [x402-sponsor-relay](https://github.com/aibtcdev/x402-sponsor-relay)
 - [PayAI Starter Templates](https://github.com/PayAINetwork) - Express, Axios, Next.js examples
 
 ### Live Examples
-- [x402.aibtc.dev](https://x402.aibtc.dev) - Production API accepting Stacks payments
+- [x402.aibtc.dev](https://x402.aibtc.dev) - Testnet API for development and testing
+- [x402.aibtc.com](https://x402.aibtc.com) - Mainnet production API
 - [stx402.com](https://stx402.com) - Stacks x402 showcase
 
 ## License
