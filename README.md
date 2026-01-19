@@ -35,39 +35,42 @@ This repo includes examples for both **Express** and **Hono**:
 
 Both implementations return identical x402-compliant 402 responses.
 
-## Why Stacks?
+## Why Cross-Chain?
+
+Different networks offer different advantages. Supporting both lets users pay with their preferred assets:
 
 | Feature | EVM (Base) | Stacks |
 |---------|------------|--------|
-| Settlement | ~2 sec | ~30 sec (Bitcoin-secured) |
+| Settlement | ~2 sec | ~5 sec |
 | Tokens | USDC | STX, sBTC, USDCx |
-| Finality | Probabilistic | Bitcoin finality |
-| Gasless | No | Yes (sponsor relay) |
+| Finality | L2 sequencer | Bitcoin-anchored |
+| Gasless | Paymasters | Sponsor relay |
+| Unique value | Fast, cheap USDC | Programmable BTC (sBTC) |
 
-**For AI agents**: Stacks offers gasless transactions via sponsor relay, making it ideal for autonomous agent payments.
+**For AI agents**: Both networks support gasless transactions - Base via paymasters, Stacks via [sponsor relay](https://github.com/aibtcdev/x402-sponsor-relay).
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Your API                              │
-│  ┌─────────────────┐              ┌─────────────────┐       │
-│  │  EVM Middleware │              │ Stacks Middleware│       │
-│  │  (@x402/express)│              │  (x402-stacks)  │       │
-│  └────────┬────────┘              └────────┬────────┘       │
-└───────────┼────────────────────────────────┼────────────────┘
-            │                                │
-            ▼                                ▼
-┌───────────────────────┐      ┌───────────────────────┐
-│   EVM Facilitator     │      │  Stacks Facilitator   │
-│  x402.org/facilitator │      │ facilitator.stacksx402│
-└───────────────────────┘      └───────────────────────┘
-            │                                │
-            ▼                                ▼
-┌───────────────────────┐      ┌───────────────────────┐
-│   Base Network        │      │   Stacks Network      │
-│   (USDC)             │      │   (STX/sBTC/USDCx)    │
-└───────────────────────┘      └───────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                           Your API                               │
+│  ┌───────────────────┐                ┌───────────────────┐      │
+│  │   EVM Middleware  │                │  Stacks Middleware │      │
+│  │  (@x402/express)  │                │   (x402-stacks)    │      │
+│  └─────────┬─────────┘                └─────────┬─────────┘      │
+└────────────┼────────────────────────────────────┼────────────────┘
+             │                                    │
+             ▼                                    ▼
+┌────────────────────────┐        ┌─────────────────────────────┐
+│    EVM Facilitator     │        │     Stacks Facilitator      │
+│  x402.org/facilitator  │        │ facilitator.stacksx402.com  │
+└────────────────────────┘        └─────────────────────────────┘
+             │                                    │
+             ▼                                    ▼
+┌────────────────────────┐        ┌─────────────────────────────┐
+│     Base Network       │        │      Stacks Network         │
+│        (USDC)          │        │    (STX / sBTC / USDCx)     │
+└────────────────────────┘        └─────────────────────────────┘
 ```
 
 ## Adding Stacks to Your x402 App
