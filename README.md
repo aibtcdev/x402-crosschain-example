@@ -62,7 +62,7 @@ The x402 protocol has two versions, both actively used. All networks use [CAIP-2
 
 | Network | v1 | v2 | Package |
 |---------|----|----|---------|
-| EVM (Base) | [legacy](https://github.com/coinbase/x402/tree/main/typescript/packages/legacy) | ✓ | `@x402/express` |
+| EVM (Base) | ✓ | ✓ | `@x402/express` |
 | Solana | ✓ | ✓ | `x402-solana` |
 | Stacks | ✓ | This week | `x402-stacks` |
 

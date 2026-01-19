@@ -17,7 +17,7 @@ The x402 protocol has two versions. All use CAIP-2 chain IDs (`eip155:84532`, `s
 
 | Network | v1 | v2 | Package |
 |---------|----|----|---------|
-| EVM (Base) | legacy | ✓ | `@x402/express` |
+| EVM (Base) | ✓ | ✓ | `@x402/express` |
 | Solana | ✓ | ✓ | `x402-solana` |
 | Stacks | ✓ | This week | `x402-stacks` |
 

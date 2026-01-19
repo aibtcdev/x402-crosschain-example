@@ -15,7 +15,7 @@ The x402 protocol has two versions. Both use [CAIP-2](https://chainagnostic.org/
 
 | Network | v1 | v2 | Package |
 |---------|----|----|---------|
-| EVM (Base) | [legacy](https://github.com/coinbase/x402/tree/main/typescript/packages/legacy) | ✓ | `@x402/express`, `@x402/fetch` |
+| EVM (Base) | ✓ | ✓ | `@x402/express`, `@x402/fetch` |
 | Solana | ✓ | ✓ | `x402-solana` |
 | Stacks | ✓ | This week | `x402-stacks` |
 
@@ -415,8 +415,7 @@ npm run client:stacks
 
 ### Libraries
 - [x402-stacks](https://www.npmjs.com/package/x402-stacks) - Stacks v1 + v2 (v2 this week)
-- [@x402/express](https://www.npmjs.com/package/@x402/express) - EVM v2
-- [@x402/legacy](https://github.com/coinbase/x402/tree/main/typescript/packages/legacy) - EVM v1
+- [@x402/express](https://www.npmjs.com/package/@x402/express) - EVM v1 + v2
 - [x402-solana](https://github.com/PayAINetwork/x402-solana) - Solana v1 + v2
 
 ### Services
