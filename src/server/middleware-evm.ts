@@ -6,18 +6,10 @@
  */
 
 import { Router } from "express";
+import { evmConfig, type EvmX402Context } from "../shared/evm-config.js";
 
-// =============================================================================
-// Configuration
-// =============================================================================
-
-export const evmConfig = {
-  network: "eip155:84532" as const, // Base Sepolia
-  payTo: process.env.SERVER_ADDRESS_EVM || "",
-  facilitatorUrl: process.env.EVM_FACILITATOR_URL || "https://x402.org/facilitator",
-  // USDC on Base Sepolia
-  asset: "eip155:84532/erc20:0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-};
+// Re-export for use in index.ts
+export { evmConfig };
 
 // Route configuration for x402
 export const evmRoutes = {
@@ -59,11 +51,9 @@ export const evmRoutes = {
 export const evmPaymentMiddleware = Router();
 
 evmPaymentMiddleware.use((req, res, next) => {
-  // Check for payment header
   const paymentHeader = req.header("payment-signature") || req.header("x-payment");
 
   if (!paymentHeader) {
-    // Return 402 with payment requirements
     const routeKey = `${req.method} /evm${req.path}`;
     const routeConfig = evmRoutes[routeKey as keyof typeof evmRoutes];
 
@@ -98,11 +88,12 @@ evmPaymentMiddleware.use((req, res, next) => {
   console.log(`[EVM] Payment received: ${paymentHeader.substring(0, 20)}...`);
 
   // Add payment info to request for downstream handlers
-  (req as any).x402 = {
+  const x402Context: EvmX402Context = {
     network: "evm",
     verified: true,
     paymentHeader,
   };
+  (req as any).x402 = x402Context;
 
   next();
 });

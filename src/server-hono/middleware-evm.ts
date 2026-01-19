@@ -6,37 +6,16 @@
  */
 
 import type { MiddlewareHandler } from "hono";
+import {
+  evmConfig,
+  type EvmPaymentOptions,
+  type EvmX402Context,
+} from "../shared/evm-config.js";
 
-// =============================================================================
-// Configuration
-// =============================================================================
+// Re-export for use in index.ts
+export { evmConfig };
 
-export const evmConfig = {
-  network: "eip155:84532" as const, // Base Sepolia
-  payTo: process.env.SERVER_ADDRESS_EVM || "",
-  facilitatorUrl:
-    process.env.EVM_FACILITATOR_URL || "https://x402.org/facilitator",
-  // USDC on Base Sepolia
-  asset: "eip155:84532/erc20:0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-};
-
-// =============================================================================
-// Types
-// =============================================================================
-
-export interface EvmPaymentOptions {
-  /** Amount in smallest unit (e.g., 1000 = 0.001 USDC with 6 decimals) */
-  amount: string;
-  /** Human-readable description */
-  description?: string;
-}
-
-export interface EvmX402Context {
-  network: "evm";
-  verified: boolean;
-  paymentHeader?: string;
-}
-
+// Hono Variables type for EVM x402 context
 export type EvmX402Variables = {
   evmX402?: EvmX402Context;
 };
@@ -66,12 +45,10 @@ export function evmPaymentMiddleware<E extends { Variables: EvmX402Variables }>(
   const { amount, description = "Protected resource" } = options;
 
   return async (c, next) => {
-    // Check for payment header (EVM uses both conventions)
     const paymentHeader =
       c.req.header("x-payment") || c.req.header("payment-signature");
 
     if (!paymentHeader) {
-      // Return x402-compliant 402 response
       return c.json(
         {
           x402Version: 1,

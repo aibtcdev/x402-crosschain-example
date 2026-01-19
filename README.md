@@ -1,6 +1,8 @@
 # x402 Cross-Chain Example
 
-Accept payments on **both EVM (Base) and Stacks** networks using the x402 protocol. This example shows how existing x402 apps can add Stacks support with minimal code changes.
+Add **Stacks payment support** to your existing x402 app. Whether you're on **EVM (Base)** or **Solana**, this example shows the integration pattern.
+
+> **Coming from Base or Solana?** Jump to the [Integration Guide](docs/INTEGRATION_GUIDE.md) for step-by-step instructions.
 
 ## Quick Start
 
@@ -75,102 +77,44 @@ Different networks offer different advantages. Supporting both lets users pay wi
 
 ## Adding Stacks to Your x402 App
 
-### Server Side (Express)
+The integration follows a 3-step pattern:
 
-If you already use `@x402/express`:
+```
+1. CHECK for both payment headers (yours + Stacks "X-PAYMENT")
+2. RETURN 402 with both networks in accepts[] array
+3. ROUTE to Stacks middleware when X-PAYMENT header present
+```
+
+Your existing EVM/Solana clients continue to work unchanged.
+
+**Full integration guide:** [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)
+
+### Quick Example (Express)
 
 ```typescript
-// Before: EVM only
-import { paymentMiddleware } from "@x402/express";
-app.use(paymentMiddleware(routes, evmServer));
-
-// After: Add Stacks support
-import { stacksPaymentMiddleware } from "./middleware-stacks";
-
-// EVM routes stay the same
-app.use("/evm", paymentMiddleware(routes, evmServer));
-
-// Add Stacks routes
-app.get("/stacks/weather", stacksPaymentMiddleware({ amount: 1000n }), handler);
-
-// Or: Cross-chain endpoint (accept either)
-app.get("/weather", (req, res, next) => {
-  const stacksPayment = req.header("x-payment");
+app.get("/api/data", async (req, res) => {
   const evmPayment = req.header("payment-signature");
+  const stacksPayment = req.header("x-payment");
 
-  if (stacksPayment) {
-    return stacksPaymentMiddleware({ amount: 1000n })(req, res, next);
-  }
-  // Fall through to EVM middleware
-  return evmMiddleware(req, res, next);
-}, handler);
-```
-
-### Server Side (Hono)
-
-If you use `@x402/hono`:
-
-```typescript
-import { Hono } from "hono";
-import { stacksPaymentMiddleware } from "./middleware-stacks";
-
-const app = new Hono();
-
-// Stacks-only endpoint
-app.get("/stacks/weather",
-  stacksPaymentMiddleware({ amount: 1000n, description: "Weather data" }),
-  (c) => {
-    const x402 = c.get("x402");
-    return c.json({ data: "...", paidWith: x402?.tokenType });
-  }
-);
-
-// Cross-chain: return 402 with both network options
-app.get("/weather", (c) => {
-  const payment = c.req.header("x-payment");
-  if (!payment) {
-    return c.json({
+  // No payment? Return 402 with BOTH options
+  if (!evmPayment && !stacksPayment) {
+    return res.status(402).json({
       x402Version: 1,
-      error: "Payment Required",
       accepts: [
-        { scheme: "exact", network: "eip155:84532", ... },  // EVM
-        { scheme: "exact", network: "stacks:1", ... },      // Stacks
+        { scheme: "exact", network: "eip155:84532", /* your EVM config */ },
+        { scheme: "exact", network: "stacks:1", /* Stacks config */ },
       ]
-    }, 402);
+    });
   }
-  // Route based on payment type...
+
+  // Route to Stacks if X-PAYMENT header
+  if (stacksPayment) {
+    return stacksPaymentMiddleware({ amount: 1000n })(req, res, handler);
+  }
+
+  // Your existing EVM handler
+  evmPaymentMiddleware(req, res, handler);
 });
-```
-
-### Client Side
-
-**EVM (existing):**
-```typescript
-import { wrapFetchWithPayment } from "@x402/fetch";
-const x402Fetch = wrapFetchWithPayment(fetch, evmClient);
-```
-
-**Stacks (new):**
-```typescript
-import { X402PaymentClient } from "x402-stacks";
-
-const client = new X402PaymentClient({
-  network: "mainnet",
-  privateKey: process.env.STACKS_PRIVATE_KEY,
-});
-
-// Option 1: Auto-handle 402s
-const data = await client.requestWithPayment("https://api.example.com/data");
-
-// Option 2: Manual control
-const response = await fetch(url);
-if (response.status === 402) {
-  const requirements = await response.json();
-  const signed = await client.signPayment(requirements);
-  const paid = await fetch(url, {
-    headers: { "X-PAYMENT": signed.signedTransaction }
-  });
-}
 ```
 
 ## Payment Flow Comparison
@@ -302,6 +246,9 @@ See: [x402-sponsor-relay](https://github.com/aibtcdev/x402-sponsor-relay)
 
 ## Resources
 
+### Integration
+- **[Integration Guide](docs/INTEGRATION_GUIDE.md)** - Step-by-step for adding Stacks to your app
+
 ### Stacks x402 Ecosystem
 - [x402-stacks NPM](https://www.npmjs.com/package/x402-stacks) - TypeScript client/server library
 - [Stacks Facilitator](https://github.com/x402Stacks/x402-stacks-facilitator) - Payment verification service
@@ -311,6 +258,10 @@ See: [x402-sponsor-relay](https://github.com/aibtcdev/x402-sponsor-relay)
 - [x402 Protocol](https://www.x402.org/) - Official site
 - [x402 GitHub](https://github.com/coinbase/x402) - Reference implementation
 - [@x402/express](https://www.npmjs.com/package/@x402/express) - Express middleware
+
+### Solana x402
+- [x402-solana](https://github.com/PayAINetwork/x402-solana) - Solana x402 implementation
+- [PayAI Starter Templates](https://github.com/PayAINetwork) - Express, Axios, Next.js examples
 
 ### Live Examples
 - [x402.aibtc.dev](https://x402.aibtc.dev) - Production API accepting Stacks payments

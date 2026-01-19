@@ -1,10 +1,15 @@
 /**
  * x402 Cross-Chain Example Server (Hono)
  *
- * Demonstrates accepting payments on BOTH EVM (Base) and Stacks networks
- * using the x402 protocol with Hono framework.
+ * This example shows how to add Stacks support to an existing x402 Hono app.
+ * If you're coming from EVM (Base) or Solana, the key patterns are:
+ *
+ * 1. HEADERS: Stacks uses "X-PAYMENT" header (vs "Payment-Signature" for EVM)
+ * 2. 402 RESPONSE: Return accepts[] array with BOTH network options
+ * 3. ROUTING: Check header format to route to correct middleware
  *
  * This is the Hono equivalent of the Express server in src/server/.
+ * See docs/INTEGRATION_GUIDE.md for step-by-step integration instructions.
  */
 
 import { Hono } from "hono";
@@ -15,7 +20,6 @@ import { config } from "dotenv";
 import {
   stacksPaymentMiddleware,
   stacksConfig,
-  STACKS_NETWORK_IDS,
   getX402Context,
   type X402Variables,
 } from "./middleware-stacks.js";
@@ -24,6 +28,12 @@ import {
   evmConfig,
   type EvmX402Variables,
 } from "./middleware-evm.js";
+import { createWeatherResponse } from "../shared/mock-data.js";
+import {
+  STACKS_NETWORK_IDS,
+  DEFAULT_ACCEPTED_TOKENS,
+  DEFAULT_TIMEOUT_SECONDS,
+} from "../shared/stacks-config.js";
 
 config();
 
@@ -102,12 +112,7 @@ app.get(
   evmPaymentMiddleware({ amount: "1000", description: "Weather data" }),
   (c) => {
     const city = c.req.query("city") || "San Francisco";
-    return c.json({
-      city,
-      temperature: Math.floor(Math.random() * 30) + 10,
-      conditions: ["sunny", "cloudy", "rainy"][Math.floor(Math.random() * 3)],
-      paidWith: "EVM (Base USDC)",
-    });
+    return c.json(createWeatherResponse(city, "EVM (Base USDC)"));
   }
 );
 
@@ -124,13 +129,8 @@ app.get(
   (c) => {
     const x402 = getX402Context(c);
     const city = c.req.query("city") || "San Francisco";
-    return c.json({
-      city,
-      temperature: Math.floor(Math.random() * 30) + 10,
-      conditions: ["sunny", "cloudy", "rainy"][Math.floor(Math.random() * 3)],
-      paidWith: `Stacks (${x402?.tokenType || "STX"})`,
-      txId: x402?.txId,
-    });
+    const paidWith = `Stacks (${x402?.tokenType || "STX"})`;
+    return c.json(createWeatherResponse(city, paidWith, x402?.txId));
   }
 );
 
@@ -154,82 +154,102 @@ app.post(
 );
 
 // =============================================================================
-// Cross-Chain Endpoint (accept EITHER network)
+// Cross-Chain Endpoint (accept EITHER EVM or Stacks)
+// =============================================================================
+//
+// THIS IS THE KEY PATTERN FOR ADDING STACKS TO YOUR EXISTING x402 HONO APP
+//
+// If you're coming from:
+//   - EVM (Base): You already use "Payment-Signature" header and @x402/hono
+//   - Solana: You use similar patterns with x402-solana
+//
+// To add Stacks support, you need to:
+//   1. Check for BOTH header types (Stacks uses "X-PAYMENT")
+//   2. Return 402 response with BOTH networks in accepts[] array
+//   3. Route to appropriate middleware based on which header is present
 // =============================================================================
 
-/**
- * Cross-chain endpoint demonstrating x402-compliant multi-network support.
- *
- * Pattern:
- * 1. Return 402 with accepts array containing BOTH network options
- * 2. Check which payment header format to route accordingly
- */
 app.get("/weather", async (c) => {
-  const paymentHeader = c.req.header("x-payment");
-  const evmPaymentHeader = c.req.header("payment-signature");
+  // ---------------------------------------------------------------------------
+  // STEP 1: Check for payment headers from BOTH networks
+  // ---------------------------------------------------------------------------
+  // EVM/Base uses: "Payment-Signature" header (from @x402/hono)
+  // Solana uses:   Similar header pattern (from x402-solana)
+  // Stacks uses:   "X-PAYMENT" header (from x402-stacks)
+  // ---------------------------------------------------------------------------
+  const evmPayment = c.req.header("payment-signature");
+  const stacksPayment = c.req.header("x-payment");
 
-  // Detect Stacks payment (longer hex string)
-  const isStacksPayment =
-    paymentHeader &&
-    (paymentHeader.length > 500 || paymentHeader.startsWith("0x"));
-
-  // If no payment, return 402 with BOTH network options
-  if (!paymentHeader && !evmPaymentHeader) {
+  // ---------------------------------------------------------------------------
+  // STEP 2: If no payment, return 402 with BOTH network options
+  // ---------------------------------------------------------------------------
+  // This is the x402-compliant response format. Clients parse the accepts[]
+  // array and choose their preferred network. Your existing EVM/Solana clients
+  // will still work - they just pick the network they support.
+  // ---------------------------------------------------------------------------
+  if (!evmPayment && !stacksPayment) {
     const nonce = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + DEFAULT_TIMEOUT_SECONDS * 1000).toISOString();
 
-    return c.json(
-      {
-        x402Version: 1,
-        error: "Payment Required",
-        accepts: [
-          // EVM option
-          {
-            scheme: "exact",
-            network: evmConfig.network,
-            maxAmountRequired: "1000",
-            asset: evmConfig.asset,
-            payTo: evmConfig.payTo,
-            resource: c.req.path,
-            description: "Weather data for a city",
-            maxTimeoutSeconds: 300,
-            extra: {
-              facilitator: evmConfig.facilitatorUrl,
-            },
+    return c.json({
+      x402Version: 1,
+      error: "Payment Required",
+      accepts: [
+        // YOUR EXISTING EVM OPTION (keep this as-is from your current implementation)
+        {
+          scheme: "exact",
+          network: evmConfig.network,              // "eip155:84532" for Base Sepolia
+          maxAmountRequired: "1000",               // Amount in smallest unit
+          asset: evmConfig.asset,                  // USDC contract address
+          payTo: evmConfig.payTo,                  // Your EVM wallet address
+          resource: c.req.path,
+          description: "Weather data for a city",
+          maxTimeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
+          extra: {
+            facilitator: evmConfig.facilitatorUrl, // EVM facilitator URL
           },
-          // Stacks option
-          {
-            scheme: "exact",
-            network: STACKS_NETWORK_IDS[stacksConfig.network],
-            maxAmountRequired: "1000",
-            asset: "STX",
-            payTo: stacksConfig.payTo,
-            resource: c.req.path,
-            description: "Weather data for a city",
-            maxTimeoutSeconds: 300,
-            extra: {
-              nonce,
-              expiresAt,
-              tokenType: "STX",
-              acceptedTokens: ["STX", "sBTC", "USDCx"],
-              facilitator: stacksConfig.facilitatorUrl,
-            },
+        },
+        // NEW: ADD THIS STACKS OPTION to enable Stacks payments
+        {
+          scheme: "exact",
+          network: STACKS_NETWORK_IDS[stacksConfig.network], // "stacks:1" or "stacks:2147483648"
+          maxAmountRequired: "1000",               // Amount in microSTX (1000 = 0.001 STX)
+          asset: "STX",                            // Native STX token
+          payTo: stacksConfig.payTo,               // Your Stacks wallet address
+          resource: c.req.path,
+          description: "Weather data for a city",
+          maxTimeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
+          extra: {
+            // Stacks-specific fields that x402-stacks client uses
+            nonce,                                 // Unique request ID
+            expiresAt,                             // Payment expiration
+            tokenType: "STX",                      // Which token to pay with
+            acceptedTokens: DEFAULT_ACCEPTED_TOKENS, // ["STX", "sBTC", "USDCx"]
+            facilitator: stacksConfig.facilitatorUrl,
           },
-        ],
-      },
-      402
-    );
+        },
+      ],
+    }, 402);
   }
 
-  // Route based on payment type
+  // ---------------------------------------------------------------------------
+  // STEP 3: Route to appropriate middleware based on payment header
+  // ---------------------------------------------------------------------------
+  // Stacks transactions are hex-encoded and longer than EVM signatures.
+  // Check for Stacks payment first, then fall through to your existing EVM handler.
+  // ---------------------------------------------------------------------------
+
+  // Detect Stacks payment: longer payload or starts with "0x" (hex-encoded tx)
+  const isStacksPayment = stacksPayment && (stacksPayment.length > 500 || stacksPayment.startsWith("0x"));
+
   if (isStacksPayment) {
-    // Use Stacks middleware
+    // Route to Stacks middleware (from x402-stacks package)
     const middleware = stacksPaymentMiddleware({
       amount: 1000n,
       description: "Weather data for a city",
     });
 
-    // Execute middleware and return response
+    // Execute middleware and get context
     let x402Context: ReturnType<typeof getX402Context>;
     await middleware(c, async () => {
       x402Context = getX402Context(c);
@@ -241,24 +261,21 @@ app.get("/weather", async (c) => {
     }
 
     const city = c.req.query("city") || "San Francisco";
-    return c.json({
-      city,
-      temperature: Math.floor(Math.random() * 30) + 10,
-      conditions: ["sunny", "cloudy", "rainy"][Math.floor(Math.random() * 3)],
-      paidWith: `Stacks (${x402Context?.tokenType || "STX"})`,
-      txId: x402Context?.txId,
-    });
+    const paidWith = `Stacks (${x402Context?.tokenType || "STX"})`;
+    return c.json(createWeatherResponse(city, paidWith, x402Context?.txId));
   }
 
-  // EVM payment (simplified verification for demo)
+  // YOUR EXISTING EVM HANDLER (keep as-is, or use @x402/hono middleware)
+  // In production, you'd verify via your existing EVM facilitator
   const city = c.req.query("city") || "San Francisco";
-  return c.json({
-    city,
-    temperature: Math.floor(Math.random() * 30) + 10,
-    conditions: ["sunny", "cloudy", "rainy"][Math.floor(Math.random() * 3)],
-    paidWith: "EVM (detected payment header)",
-    note: "Full EVM verification would use @x402/hono",
-  });
+  return c.json(
+    createWeatherResponse(
+      city,
+      "EVM (Base)",
+      undefined,
+      "Production: verify via @x402/hono and EVM facilitator"
+    )
+  );
 });
 
 // =============================================================================
