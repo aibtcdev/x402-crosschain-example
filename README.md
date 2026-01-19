@@ -13,13 +13,27 @@ npm install
 # Configure (copy and edit .env)
 cp .env.example .env
 
-# Run server
+# Run server (Express on port 3000)
 npm run dev
+
+# Or run Hono server (port 3001)
+npm run dev:hono
 
 # Test clients (in another terminal)
 npm run client:stacks
 npm run client:evm
 ```
+
+## Framework Support
+
+This repo includes examples for both **Express** and **Hono**:
+
+| Framework | Server | Port | Middleware |
+|-----------|--------|------|------------|
+| Express | `src/server/` | 3000 | `npm run dev` |
+| Hono | `src/server-hono/` | 3001 | `npm run dev:hono` |
+
+Both implementations return identical x402-compliant 402 responses.
 
 ## Why Stacks?
 
@@ -87,6 +101,42 @@ app.get("/weather", (req, res, next) => {
   // Fall through to EVM middleware
   return evmMiddleware(req, res, next);
 }, handler);
+```
+
+### Server Side (Hono)
+
+If you use `@x402/hono`:
+
+```typescript
+import { Hono } from "hono";
+import { stacksPaymentMiddleware } from "./middleware-stacks";
+
+const app = new Hono();
+
+// Stacks-only endpoint
+app.get("/stacks/weather",
+  stacksPaymentMiddleware({ amount: 1000n, description: "Weather data" }),
+  (c) => {
+    const x402 = c.get("x402");
+    return c.json({ data: "...", paidWith: x402?.tokenType });
+  }
+);
+
+// Cross-chain: return 402 with both network options
+app.get("/weather", (c) => {
+  const payment = c.req.header("x-payment");
+  if (!payment) {
+    return c.json({
+      x402Version: 1,
+      error: "Payment Required",
+      accepts: [
+        { scheme: "exact", network: "eip155:84532", ... },  // EVM
+        { scheme: "exact", network: "stacks:1", ... },      // Stacks
+      ]
+    }, 402);
+  }
+  // Route based on payment type...
+});
 ```
 
 ### Client Side

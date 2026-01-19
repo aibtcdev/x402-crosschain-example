@@ -9,8 +9,10 @@ Cross-chain x402 payment example demonstrating how to accept payments on both EV
 ## Commands
 
 ```bash
-npm run dev           # Start server with hot reload (tsx watch)
-npm run start         # Start server without watch
+npm run dev           # Start Express server with hot reload (port 3000)
+npm run dev:hono      # Start Hono server with hot reload (port 3001)
+npm run start         # Start Express server without watch
+npm run start:hono    # Start Hono server without watch
 npm run client:stacks # Run Stacks payment client test
 npm run client:evm    # Run EVM payment client test
 npm run check         # TypeScript type checking
@@ -18,7 +20,7 @@ npm run check         # TypeScript type checking
 
 ## Architecture
 
-### Server (`src/server/`)
+### Express Server (`src/server/`)
 
 - **index.ts**: Express server with three endpoint types:
   - `/evm/*` - EVM-only endpoints using `@x402/express` pattern
@@ -28,6 +30,14 @@ npm run check         # TypeScript type checking
 - **middleware-evm.ts**: EVM payment middleware (simplified demo; production would use `@x402/express` with `getEvmExactSchemeServer`)
 
 - **middleware-stacks.ts**: Stacks payment middleware using `X402PaymentVerifier` from `x402-stacks`. Supports STX, sBTC, and USDCx tokens.
+
+### Hono Server (`src/server-hono/`)
+
+Hono implementation with identical functionality to Express. Based on [aibtcdev/x402-api](https://github.com/aibtcdev/x402-api).
+
+- **index.ts**: Hono server with same endpoint structure as Express
+- **middleware-stacks.ts**: Hono-native Stacks middleware using `c.set("x402", ...)` for context
+- **middleware-evm.ts**: Simplified EVM middleware (production would use `@x402/hono`)
 
 ### Client (`src/client/`)
 
@@ -46,7 +56,8 @@ npm run check         # TypeScript type checking
 ## Key Dependencies
 
 - `x402-stacks` - Stacks payment client/verifier
-- `@x402/express`, `@x402/fetch`, `@x402/evm` - Coinbase x402 for EVM
+- `@x402/express`, `@x402/hono`, `@x402/fetch`, `@x402/evm` - Coinbase x402 for EVM
+- `hono`, `@hono/node-server` - Hono framework
 
 ## Environment Variables
 

@@ -5,17 +5,22 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server/index.ts",
+    "dev:hono": "tsx watch src/server-hono/index.ts",
     "start": "tsx src/server/index.ts",
+    "start:hono": "tsx src/server-hono/index.ts",
     "client:evm": "tsx src/client/evm-client.ts",
     "client:stacks": "tsx src/client/stacks-client.ts",
     "check": "tsc --noEmit"
   },
   "dependencies": {
+    "@hono/node-server": "^1.13.0",
     "@x402/core": "^2.2.0",
     "@x402/evm": "^2.2.0",
     "@x402/express": "^2.2.0",
     "@x402/fetch": "^2.2.0",
+    "@x402/hono": "^2.2.0",
     "x402-stacks": "^1.1.1",
+    "hono": "^4.6.0",
     "express": "^4.21.0",
     "dotenv": "^16.4.5"
   },
