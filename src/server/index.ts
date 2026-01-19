@@ -8,8 +8,12 @@
 
 import express from "express";
 import { config } from "dotenv";
-import { evmPaymentMiddleware, evmRoutes } from "./middleware-evm.js";
-import { stacksPaymentMiddleware, stacksConfig } from "./middleware-stacks.js";
+import { evmPaymentMiddleware, evmRoutes, evmConfig } from "./middleware-evm.js";
+import {
+  stacksPaymentMiddleware,
+  stacksConfig,
+  STACKS_NETWORK_IDS,
+} from "./middleware-stacks.js";
 
 config();
 
@@ -90,71 +94,117 @@ app.post("/evm/ai/complete", (req, res) => {
 // Stacks-Only Endpoints (using x402-stacks)
 // =============================================================================
 
-app.get("/stacks/weather", stacksPaymentMiddleware({ amount: 1000n }), (req, res) => {
-  const city = req.query.city || "San Francisco";
-  res.json({
-    city,
-    temperature: Math.floor(Math.random() * 30) + 10,
-    conditions: ["sunny", "cloudy", "rainy"][Math.floor(Math.random() * 3)],
-    paidWith: `Stacks (${(req as any).x402?.tokenType || "STX"})`,
-    txId: (req as any).x402?.txId,
-  });
-});
+app.get(
+  "/stacks/weather",
+  stacksPaymentMiddleware({
+    amount: 1000n,
+    description: "Weather data for a city",
+  }),
+  (req, res) => {
+    const city = req.query.city || "San Francisco";
+    res.json({
+      city,
+      temperature: Math.floor(Math.random() * 30) + 10,
+      conditions: ["sunny", "cloudy", "rainy"][Math.floor(Math.random() * 3)],
+      paidWith: `Stacks (${(req as any).x402?.tokenType || "STX"})`,
+      txId: (req as any).x402?.txId,
+    });
+  }
+);
 
-app.post("/stacks/ai/complete", stacksPaymentMiddleware({ amount: 10000n }), (req, res) => {
-  const { prompt } = req.body;
-  res.json({
-    prompt,
-    completion: `This is a mock AI response to: "${prompt}"`,
-    tokens: { input: prompt?.length || 0, output: 50 },
-    paidWith: `Stacks (${(req as any).x402?.tokenType || "STX"})`,
-    txId: (req as any).x402?.txId,
-  });
-});
+app.post(
+  "/stacks/ai/complete",
+  stacksPaymentMiddleware({
+    amount: 10000n,
+    description: "AI text completion",
+  }),
+  (req, res) => {
+    const { prompt } = req.body;
+    res.json({
+      prompt,
+      completion: `This is a mock AI response to: "${prompt}"`,
+      tokens: { input: prompt?.length || 0, output: 50 },
+      paidWith: `Stacks (${(req as any).x402?.tokenType || "STX"})`,
+      txId: (req as any).x402?.txId,
+    });
+  }
+);
 
 // =============================================================================
 // Cross-Chain Endpoints (accept EITHER network)
 // =============================================================================
 
 /**
+ * Cross-chain endpoint demonstrating x402-compliant multi-network support.
+ *
  * This is the key pattern for cross-chain support:
- * Check which payment header is present and route accordingly.
+ * 1. Return 402 with accepts array containing BOTH network options
+ * 2. Check which payment header is present and route accordingly
+ *
+ * The 402 response uses the standard x402 format so any compliant client
+ * can parse it and choose their preferred network.
  */
 app.get("/weather", async (req, res, next) => {
-  const evmPayment = req.header("payment-signature");
+  const evmPayment = req.header("x-payment") || req.header("payment-signature");
   const stacksPayment = req.header("x-payment");
-  const preferredNetwork = req.header("x-preferred-network");
 
-  // If no payment provided, return 402 with BOTH network options
+  // Detect which network based on header format
+  // Stacks transactions are hex-encoded and start with 0x or are longer
+  const isStacksPayment =
+    stacksPayment && (stacksPayment.length > 500 || stacksPayment.startsWith("0x"));
+
+  // If no payment provided, return x402-compliant 402 with BOTH network options
   if (!evmPayment && !stacksPayment) {
+    const nonce = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
     return res.status(402).json({
+      x402Version: 1,
       error: "Payment Required",
-      message: "This endpoint accepts payments on multiple networks",
-      networks: {
-        evm: {
-          network: "eip155:84532", // Base Sepolia
-          payTo: process.env.SERVER_ADDRESS_EVM,
-          maxAmountRequired: "1000", // 0.001 USDC (6 decimals)
-          asset: "eip155:84532/erc20:0x036CbD53842c5426634e7929541eC2318f3dCF7e", // USDC on Base Sepolia
-          facilitator: process.env.EVM_FACILITATOR_URL || "https://x402.org/facilitator",
+      accepts: [
+        // EVM option (Base Sepolia)
+        {
+          scheme: "exact",
+          network: evmConfig.network,
+          maxAmountRequired: "1000",
+          asset: evmConfig.asset,
+          payTo: evmConfig.payTo,
+          resource: req.originalUrl || req.path,
+          description: "Weather data for a city",
+          maxTimeoutSeconds: 300,
+          extra: {
+            facilitator: evmConfig.facilitatorUrl,
+          },
         },
-        stacks: {
-          network: process.env.STACKS_NETWORK || "testnet",
-          payTo: process.env.SERVER_ADDRESS_STACKS,
-          maxAmountRequired: "1000", // 0.001 STX (6 decimals)
-          tokenType: "STX",
-          facilitator: process.env.STACKS_FACILITATOR_URL || "https://facilitator.stacksx402.com",
+        // Stacks option
+        {
+          scheme: "exact",
+          network: STACKS_NETWORK_IDS[stacksConfig.network],
+          maxAmountRequired: "1000",
+          asset: "STX",
+          payTo: stacksConfig.payTo,
+          resource: req.originalUrl || req.path,
+          description: "Weather data for a city",
+          maxTimeoutSeconds: 300,
+          extra: {
+            nonce,
+            expiresAt,
+            tokenType: "STX",
+            acceptedTokens: ["STX", "sBTC", "USDCx"],
+            facilitator: stacksConfig.facilitatorUrl,
+          },
         },
-      },
-      resource: req.path,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      ],
     });
   }
 
   // Route to appropriate handler based on payment type
-  if (stacksPayment) {
+  if (isStacksPayment) {
     // Handle Stacks payment
-    return stacksPaymentMiddleware({ amount: 1000n })(req, res, () => {
+    return stacksPaymentMiddleware({
+      amount: 1000n,
+      description: "Weather data for a city",
+    })(req, res, () => {
       const city = req.query.city || "San Francisco";
       res.json({
         city,

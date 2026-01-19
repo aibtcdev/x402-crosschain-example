@@ -3,6 +3,9 @@
  *
  * This shows how to add Stacks payment support to an x402 app.
  * The pattern mirrors the EVM middleware, making it easy to understand.
+ *
+ * Returns x402-compliant 402 responses per the Stacks scheme specification:
+ * https://github.com/coinbase/x402/pull/962
  */
 
 import { Request, Response, NextFunction } from "express";
@@ -18,6 +21,13 @@ export const stacksConfig = {
   payTo: process.env.SERVER_ADDRESS_STACKS || "",
   facilitatorUrl:
     process.env.STACKS_FACILITATOR_URL || "https://facilitator.stacksx402.com",
+};
+
+// CAIP-2 network identifiers for Stacks
+// See: https://github.com/coinbase/x402/pull/962
+export const STACKS_NETWORK_IDS: Record<NetworkType, string> = {
+  mainnet: "stacks:1",
+  testnet: "stacks:2147483648",
 };
 
 // Token contracts for sBTC and USDCx
@@ -47,6 +57,23 @@ const TOKEN_CONTRACTS: Record<
   },
 };
 
+/**
+ * Get the x402-compliant asset identifier for a token type
+ * - STX: "STX" (native token)
+ * - sBTC/USDCx: Full contract identifier "address.name::token-name"
+ */
+function getAssetIdentifier(
+  tokenType: TokenType,
+  network: NetworkType
+): string {
+  if (tokenType === "STX") {
+    return "STX";
+  }
+  const contract = TOKEN_CONTRACTS[network][tokenType as "sBTC" | "USDCx"];
+  // Format: "address.contract-name::token-name" for SIP-010 tokens
+  return `${contract.address}.${contract.name}::${contract.name}`;
+}
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -54,8 +81,12 @@ const TOKEN_CONTRACTS: Record<
 interface StacksPaymentOptions {
   /** Amount in smallest unit (microSTX for STX, satoshis for sBTC) */
   amount: bigint;
+  /** Human-readable description of the resource */
+  description?: string;
   /** Optional: specific token types to accept */
   acceptTokens?: TokenType[];
+  /** Payment timeout in seconds (default: 300) */
+  maxTimeoutSeconds?: number;
 }
 
 interface X402Context {
@@ -98,7 +129,12 @@ declare global {
  * ```
  */
 export function stacksPaymentMiddleware(options: StacksPaymentOptions) {
-  const { amount, acceptTokens = ["STX", "sBTC", "USDCx"] } = options;
+  const {
+    amount,
+    description = "Protected resource",
+    acceptTokens = ["STX", "sBTC", "USDCx"],
+    maxTimeoutSeconds = 300,
+  } = options;
 
   return async (req: Request, res: Response, next: NextFunction) => {
     // Check for X-PAYMENT header (Stacks uses this convention)
@@ -117,29 +153,43 @@ export function stacksPaymentMiddleware(options: StacksPaymentOptions) {
     }
 
     if (!signedTx) {
-      // Return 402 with payment requirements
+      // Return x402-compliant 402 response
+      // Format matches Coinbase x402 spec with Stacks scheme extensions
+      const nonce = crypto.randomUUID();
+      const expiresAt = new Date(
+        Date.now() + maxTimeoutSeconds * 1000
+      ).toISOString();
+
+      // Build token contract info for extra field
       const tokenContract =
         tokenType !== "STX"
           ? TOKEN_CONTRACTS[stacksConfig.network][tokenType as "sBTC" | "USDCx"]
           : undefined;
 
       return res.status(402).json({
-        // x402 standard fields
-        maxAmountRequired: amount.toString(),
-        resource: req.path,
-        payTo: stacksConfig.payTo,
-        network: stacksConfig.network,
-        nonce: crypto.randomUUID(),
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-
-        // Stacks-specific fields
-        tokenType,
-        ...(tokenContract && { tokenContract }),
-        acceptedTokens: acceptTokens,
-
-        // Helpful info for clients
-        facilitator: stacksConfig.facilitatorUrl,
-        message: "X-PAYMENT header with signed Stacks transaction required",
+        x402Version: 1,
+        error: "Payment Required",
+        accepts: [
+          {
+            scheme: "exact",
+            network: STACKS_NETWORK_IDS[stacksConfig.network],
+            maxAmountRequired: amount.toString(),
+            asset: getAssetIdentifier(tokenType, stacksConfig.network),
+            payTo: stacksConfig.payTo,
+            resource: req.originalUrl || req.path,
+            description,
+            maxTimeoutSeconds,
+            extra: {
+              // Stacks-specific fields in extra object per spec
+              nonce,
+              expiresAt,
+              tokenType,
+              ...(tokenContract && { tokenContract }),
+              acceptedTokens: acceptTokens,
+              facilitator: stacksConfig.facilitatorUrl,
+            },
+          },
+        ],
       });
     }
 
@@ -205,21 +255,43 @@ export function stacksPaymentMiddleware(options: StacksPaymentOptions) {
 /**
  * Integration Notes:
  *
- * The x402-stacks package provides:
+ * This middleware returns x402-compliant 402 responses that match the
+ * Coinbase x402 specification with Stacks scheme extensions.
  *
- * Server-side:
- * - X402PaymentVerifier: Verifies and settles payments via facilitator
- * - Middleware helpers: x402PaymentRequired, createPaymentGate, etc.
+ * 402 Response Format:
+ * {
+ *   "x402Version": 1,
+ *   "error": "Payment Required",
+ *   "accepts": [{
+ *     "scheme": "exact",
+ *     "network": "stacks:2147483648",  // CAIP-2 format
+ *     "maxAmountRequired": "1000",
+ *     "asset": "STX",                  // or full contract ID for SIP-010
+ *     "payTo": "SP...",
+ *     "resource": "/api/data",
+ *     "description": "...",
+ *     "maxTimeoutSeconds": 300,
+ *     "extra": {                       // Stacks-specific extensions
+ *       "nonce": "uuid",
+ *       "expiresAt": "ISO-8601",
+ *       "tokenType": "STX",
+ *       "acceptedTokens": ["STX", "sBTC", "USDCx"],
+ *       "facilitator": "https://facilitator.stacksx402.com"
+ *     }
+ *   }]
+ * }
  *
- * Client-side:
- * - X402PaymentClient: Signs and sends payments
- * - withPaymentInterceptor: Axios/fetch interceptor for automatic payment
+ * Network Identifiers (CAIP-2):
+ * - Mainnet: "stacks:1"
+ * - Testnet: "stacks:2147483648"
  *
- * Key differences from EVM:
- * - Uses X-PAYMENT header (not PAYMENT-SIGNATURE)
- * - Signed transaction is hex-encoded Stacks transaction
- * - Facilitator at facilitator.stacksx402.com
- * - Supports STX, sBTC, and USDCx tokens
+ * Asset Identifiers:
+ * - STX: "STX" (native token)
+ * - sBTC: "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token::sbtc-token"
+ * - USDCx: "SP120SBRBQJ00MCWS7TM5R8WJNTTKD5K0HFRC2CNE.usdcx::usdcx"
  *
- * See: https://www.npmjs.com/package/x402-stacks
+ * See:
+ * - Stacks scheme spec: https://github.com/coinbase/x402/pull/962
+ * - x402-stacks npm: https://www.npmjs.com/package/x402-stacks
+ * - Facilitator: https://github.com/x402Stacks/x402-stacks-facilitator
  */
