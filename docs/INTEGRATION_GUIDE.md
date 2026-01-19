@@ -1,37 +1,49 @@
-# Adding Stacks to Your x402 App
+# Supporting Both x402 Protocol Versions
 
-This guide shows how to add Stacks payment support to your existing x402 application. Whether you're coming from **EVM (Base)** or **Solana**, the integration follows the same pattern.
+This guide shows how to support **both x402 protocol versions** in your application. Whether you're coming from **EVM (Base)**, **Solana**, or **Stacks**, the integration follows the same pattern.
+
+## Protocol Versions
+
+The x402 protocol has two versions, both actively used:
+
+| Version | Header | Networks | Spec |
+|---------|--------|----------|------|
+| **v1** | `X-PAYMENT` | Stacks, others | [x402-specification-v1.md](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v1.md) |
+| **v2** | `Payment-Signature` | EVM (Base), Solana | [x402-specification-v2.md](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md) |
+
+Both versions follow the same core flow. The difference is header names and network ID format.
 
 ## Quick Reference
 
-| Component | EVM (Base) | Solana | Stacks |
-|-----------|------------|--------|--------|
-| **Payment Header** | `Payment-Signature` | Similar | `X-PAYMENT` |
-| **Network ID** | `eip155:84532` | Solana chain ID | `stacks:1` (mainnet) |
-| **Native Token** | ETH/USDC | SOL/USDC | STX |
-| **Server Package** | `@x402/express` | `x402-solana` | `x402-stacks` |
-| **Client Package** | `@x402/fetch` | `x402-solana` | `x402-stacks` |
-| **Facilitator** | x402.org | PayAI | stacksx402.com |
+| Component | v2 (EVM/Solana) | v1 (Stacks) |
+|-----------|-----------------|-------------|
+| **Payment Header** | `Payment-Signature` | `X-PAYMENT` |
+| **Network ID Format** | CAIP-2 (`eip155:84532`) | Custom (`stacks:1`) |
+| **Server Package** | `@x402/express`, `x402-solana` | `x402-stacks` |
+| **Client Package** | `@x402/fetch`, `x402-solana` | `x402-stacks` |
+| **Facilitator** | x402.org, PayAI | stacksx402.com |
+
+> **Coming soon**: The Stacks facilitator is adding v2-compatible endpoints for unified cross-chain flows.
 
 ## The 3-Step Pattern
 
-Adding Stacks support requires three changes to your existing endpoint:
+Supporting both protocol versions requires three changes:
 
 ```
-1. CHECK for both payment headers (yours + Stacks)
-2. RETURN 402 with both network options in accepts[]
-3. ROUTE to Stacks middleware when X-PAYMENT header present
+1. CHECK for both payment headers (v2 "Payment-Signature" + v1 "X-PAYMENT")
+2. RETURN 402 with all network options in accepts[]
+3. ROUTE to appropriate middleware based on which header is present
 ```
 
-Your existing EVM/Solana clients continue to work unchanged.
+Your existing clients continue to work unchanged.
 
 ---
 
-## For EVM (Base) Developers
+## For v2 Developers (EVM/Base)
 
-If you're using `@x402/express` or `@x402/hono`:
+If you're using `@x402/express` or `@x402/hono` and want to add v1 support:
 
-### Before (EVM only)
+### Before (v2 only)
 
 ```typescript
 import { paymentMiddleware } from "@x402/express";
@@ -41,27 +53,27 @@ app.get("/api/data", paymentMiddleware(routes, evmServer), (req, res) => {
 });
 ```
 
-### After (EVM + Stacks)
+### After (v2 + v1)
 
 ```typescript
 import { paymentMiddleware } from "@x402/express";
-import { stacksPaymentMiddleware } from "x402-stacks/middleware"; // or your middleware
+import { stacksPaymentMiddleware } from "x402-stacks/middleware";
 
 app.get("/api/data", async (req, res, next) => {
-  // STEP 1: Check for payment headers from BOTH networks
-  const evmPayment = req.header("payment-signature");
-  const stacksPayment = req.header("x-payment");
+  // STEP 1: Check for both protocol versions
+  const v2Payment = req.header("payment-signature");  // v2 (EVM)
+  const v1Payment = req.header("x-payment");          // v1 (Stacks)
 
-  // STEP 2: No payment? Return 402 with BOTH options
-  if (!evmPayment && !stacksPayment) {
+  // STEP 2: No payment? Return 402 with all options
+  if (!v2Payment && !v1Payment) {
     return res.status(402).json({
       x402Version: 1,
       error: "Payment Required",
       accepts: [
-        // Your existing EVM option
+        // v2: EVM option
         {
           scheme: "exact",
-          network: "eip155:84532",           // Base Sepolia
+          network: "eip155:84532",           // Base Sepolia (CAIP-2)
           maxAmountRequired: "1000",
           asset: "eip155:84532/erc20:0x036CbD53842c5426634e7929541eC2318f3dCF7e",
           payTo: process.env.SERVER_ADDRESS_EVM,
@@ -70,10 +82,10 @@ app.get("/api/data", async (req, res, next) => {
           maxTimeoutSeconds: 300,
           extra: { facilitator: "https://x402.org/facilitator" },
         },
-        // NEW: Stacks option
+        // v1: Stacks option
         {
           scheme: "exact",
-          network: "stacks:1",               // Stacks mainnet (or stacks:2147483648 for testnet)
+          network: "stacks:1",               // Stacks mainnet
           maxAmountRequired: "1000",         // microSTX
           asset: "STX",
           payTo: process.env.SERVER_ADDRESS_STACKS,
@@ -92,14 +104,14 @@ app.get("/api/data", async (req, res, next) => {
     });
   }
 
-  // STEP 3: Route based on payment type
-  if (stacksPayment && (stacksPayment.length > 500 || stacksPayment.startsWith("0x"))) {
+  // STEP 3: Route based on protocol version
+  if (v1Payment && (v1Payment.length > 500 || v1Payment.startsWith("0x"))) {
     return stacksPaymentMiddleware({ amount: 1000n })(req, res, () => {
       res.json({ data: "...", paidWith: "Stacks" });
     });
   }
 
-  // Fall through to your existing EVM handler
+  // v2 handler (EVM)
   paymentMiddleware(routes, evmServer)(req, res, () => {
     res.json({ data: "...", paidWith: "EVM" });
   });
@@ -108,36 +120,36 @@ app.get("/api/data", async (req, res, next) => {
 
 ---
 
-## For Solana Developers
+## For v2 Developers (Solana)
 
-If you're using `x402-solana` (like PayAI):
+If you're using `x402-solana` (like PayAI) and want to add v1 support:
 
-### Before (Solana only)
+### Before (v2 only)
 
 ```typescript
 // Your existing Solana x402 endpoint
 app.get("/api/data", solanaPaymentMiddleware(options), handler);
 ```
 
-### After (Solana + Stacks)
+### After (v2 + v1)
 
 ```typescript
 import { stacksPaymentMiddleware } from "x402-stacks/middleware";
 
 app.get("/api/data", async (req, res, next) => {
-  // STEP 1: Check headers
-  const solanaPayment = req.header("payment-signature"); // or your Solana header
-  const stacksPayment = req.header("x-payment");
+  // STEP 1: Check for both protocol versions
+  const v2Payment = req.header("payment-signature");  // v2 (Solana)
+  const v1Payment = req.header("x-payment");          // v1 (Stacks)
 
-  // STEP 2: Return 402 with both options
-  if (!solanaPayment && !stacksPayment) {
+  // STEP 2: Return 402 with all options
+  if (!v2Payment && !v1Payment) {
     return res.status(402).json({
       x402Version: 1,
       error: "Payment Required",
       accepts: [
-        // Your existing Solana option
+        // v2: Solana option
         { /* your current Solana 402 response */ },
-        // NEW: Stacks option
+        // v1: Stacks option
         {
           scheme: "exact",
           network: "stacks:1",
@@ -159,14 +171,14 @@ app.get("/api/data", async (req, res, next) => {
     });
   }
 
-  // STEP 3: Route based on payment
-  if (stacksPayment && (stacksPayment.length > 500 || stacksPayment.startsWith("0x"))) {
+  // STEP 3: Route based on protocol version
+  if (v1Payment && (v1Payment.length > 500 || v1Payment.startsWith("0x"))) {
     return stacksPaymentMiddleware({ amount: 1000n })(req, res, () => {
       res.json({ data: "...", paidWith: "Stacks" });
     });
   }
 
-  // Your existing Solana handler
+  // v2 handler (Solana)
   solanaPaymentMiddleware(options)(req, res, next);
 });
 ```
@@ -342,7 +354,15 @@ if (response.status === 402) {
 
 ## Gasless Transactions (AI Agents)
 
-For AI agents that can't hold funds, Stacks supports sponsored (gasless) transactions:
+For AI agents that can't hold funds, all networks support gasless transactions:
+
+| Network | Mechanism | Status |
+|---------|-----------|--------|
+| EVM (Base) | Paymasters | Available |
+| Solana | Fee payers | Available |
+| Stacks | Sponsor Relay | Coming soon |
+
+### Stacks Sponsor Relay
 
 ```typescript
 import { makeSTXTokenTransfer } from "@stacks/transactions";
@@ -388,9 +408,21 @@ npm run client:stacks
 
 ## Resources
 
-- [x402-stacks NPM](https://www.npmjs.com/package/x402-stacks) - TypeScript client/server
-- [Stacks Facilitator](https://facilitator.stacksx402.com) - Payment verification
-- [x402 Spec for Stacks](https://github.com/coinbase/x402/blob/main/specs/schemes/exact/scheme_exact_stacks.md)
+### Protocol Specs
+- [x402 v1 Specification](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v1.md) - `X-PAYMENT` header
+- [x402 v2 Specification](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md) - `Payment-Signature` header
+- [Stacks Scheme Spec](https://github.com/aibtcdev/x402/blob/feature/add-stacks-ecosystem/specs/schemes/exact/scheme_exact_stacks.md) - Stacks-specific details
+
+### Libraries
+- [x402-stacks NPM](https://www.npmjs.com/package/x402-stacks) - v1 TypeScript client/server
+- [@x402/express](https://www.npmjs.com/package/@x402/express) - v2 Express middleware
+- [x402-solana](https://github.com/PayAINetwork/x402-solana) - v2 Solana implementation
+
+### Services
+- [Stacks Facilitator](https://facilitator.stacksx402.com) - v1 payment verification
+- [x402.org Facilitator](https://x402.org/facilitator) - v2 payment verification
+
+### Examples
 - [This example repo](https://github.com/aibtcdev/x402-crosschain-example) - Full working examples
 
 ## Questions?

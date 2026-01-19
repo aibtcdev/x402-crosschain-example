@@ -51,6 +51,23 @@ Different networks offer different advantages. Supporting multiple chains lets u
 
 **For AI agents**: All networks support gasless transactions - Base via paymasters, Solana via fee payers, Stacks via [sponsor relay](https://github.com/aibtcdev/x402-sponsor-relay).
 
+## Protocol Versions
+
+The x402 protocol has two versions, both actively used:
+
+| Aspect | v1 | v2 |
+|--------|----|----|
+| **Payment Header** | `X-PAYMENT` | `Payment-Signature` |
+| **Network IDs** | `stacks:1`, custom | CAIP-2 (`eip155:84532`) |
+| **Used By** | Stacks, others | Coinbase EVM, Solana |
+| **Status** | Stable, widely deployed | Latest, transport-agnostic |
+
+Both versions follow the same core flow: request → 402 → sign → submit → settle. The difference is header names and payload format.
+
+**This repo supports both** - your API can accept payments from v1 and v2 clients simultaneously.
+
+> **Coming soon**: The [Stacks facilitator](https://github.com/x402Stacks/x402-stacks-facilitator) is adding Coinbase-compatible v2 endpoints, enabling unified cross-chain flows.
+
 ## Architecture
 
 ```
@@ -75,17 +92,17 @@ Different networks offer different advantages. Supporting multiple chains lets u
 └────────────────────────┘  └────────────────────────┘  └─────────────────────────────┘
 ```
 
-## Adding Stacks to Your x402 App
+## Adding Multi-Version Support
 
-The integration follows a 3-step pattern:
+Supporting both protocol versions follows a 3-step pattern:
 
 ```
-1. CHECK for both payment headers (yours + Stacks "X-PAYMENT")
-2. RETURN 402 with both networks in accepts[] array
-3. ROUTE to Stacks middleware when X-PAYMENT header present
+1. CHECK for both payment headers (v2 "Payment-Signature" + v1 "X-PAYMENT")
+2. RETURN 402 with all network options in accepts[] array
+3. ROUTE to appropriate middleware based on which header is present
 ```
 
-Your existing EVM/Solana clients continue to work unchanged.
+Your existing clients continue to work unchanged.
 
 **Full integration guide:** [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)
 
@@ -93,33 +110,35 @@ Your existing EVM/Solana clients continue to work unchanged.
 
 ```typescript
 app.get("/api/data", async (req, res) => {
-  const evmPayment = req.header("payment-signature");
-  const stacksPayment = req.header("x-payment");
+  const v2Payment = req.header("payment-signature");  // v2 (EVM, Solana)
+  const v1Payment = req.header("x-payment");          // v1 (Stacks, others)
 
-  // No payment? Return 402 with BOTH options
-  if (!evmPayment && !stacksPayment) {
+  // No payment? Return 402 with all options
+  if (!v2Payment && !v1Payment) {
     return res.status(402).json({
       x402Version: 1,
       accepts: [
-        { scheme: "exact", network: "eip155:84532", /* your EVM config */ },
+        { scheme: "exact", network: "eip155:84532", /* EVM config */ },
         { scheme: "exact", network: "stacks:1", /* Stacks config */ },
       ]
     });
   }
 
-  // Route to Stacks if X-PAYMENT header
-  if (stacksPayment) {
+  // Route based on protocol version
+  if (v1Payment) {
     return stacksPaymentMiddleware({ amount: 1000n })(req, res, handler);
   }
 
-  // Your existing EVM handler
+  // v2 handler (EVM/Solana)
   evmPaymentMiddleware(req, res, handler);
 });
 ```
 
 ## Payment Flow Comparison
 
-### EVM Flow
+Both protocol versions follow the same pattern - the differences are header names and facilitator endpoints.
+
+### v2 Flow (EVM, Solana)
 ```
 Client                    Server                   Facilitator
   │                         │                          │
@@ -131,7 +150,7 @@ Client                    Server                   Facilitator
   │                         │                          │
   │ Sign with wallet        │                          │
   │                         │                          │
-  │ GET + payment-signature │                          │
+  │ GET + Payment-Signature │                          │
   │────────────────────────>│ POST /verify            │
   │                         │─────────────────────────>│
   │                         │<─────────────────────────│
@@ -142,7 +161,7 @@ Client                    Server                   Facilitator
   │<────────────────────────│                          │
 ```
 
-### Stacks Flow
+### v1 Flow (Stacks, others)
 ```
 Client                    Server                   Facilitator
   │                         │                          │
@@ -152,7 +171,7 @@ Client                    Server                   Facilitator
   │ 402 + payment-required  │                          │
   │<────────────────────────│                          │
   │                         │                          │
-  │ Sign STX transaction    │                          │
+  │ Sign transaction        │                          │
   │                         │                          │
   │ GET + X-PAYMENT header  │                          │
   │────────────────────────>│ POST /settle            │
@@ -163,7 +182,7 @@ Client                    Server                   Facilitator
   │<────────────────────────│                          │
 ```
 
-**Key difference**: Same pattern, different header names and transaction format.
+**Same pattern, different headers**: v2 uses `Payment-Signature`, v1 uses `X-PAYMENT`. Both use 402 responses with `accepts[]` arrays.
 
 ## Endpoints
 
@@ -211,10 +230,19 @@ X-PAYMENT-TOKEN-TYPE: sBTC
 
 ## Gasless Transactions (Sponsor Relay)
 
-Stacks supports gasless transactions for AI agents via the sponsor relay:
+All networks support gasless transactions for AI agents:
+
+| Network | Mechanism | Status |
+|---------|-----------|--------|
+| EVM (Base) | Paymasters | Available |
+| Solana | Fee payers | Available |
+| Stacks | [Sponsor Relay](https://github.com/aibtcdev/x402-sponsor-relay) | Coming soon |
+
+### Stacks Sponsor Relay
+
+Build a sponsored transaction (the relay pays gas):
 
 ```typescript
-// Build sponsored transaction (fee = 0)
 const tx = await makeSTXTokenTransfer({
   recipient,
   amount: 1000000n,
@@ -246,13 +274,17 @@ See: [x402-sponsor-relay](https://github.com/aibtcdev/x402-sponsor-relay)
 
 ## Resources
 
+### Protocol Specs
+- [x402 v1 Specification](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v1.md) - Transport-agnostic, `X-PAYMENT` header
+- [x402 v2 Specification](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md) - CAIP-2 network IDs, `Payment-Signature` header
+
 ### Integration
-- **[Integration Guide](docs/INTEGRATION_GUIDE.md)** - Step-by-step for adding Stacks to your app
+- **[Integration Guide](docs/INTEGRATION_GUIDE.md)** - Step-by-step for supporting both protocol versions
 
 ### Stacks x402 Ecosystem
 - [x402-stacks NPM](https://www.npmjs.com/package/x402-stacks) - TypeScript client/server library
 - [Stacks Facilitator](https://github.com/x402Stacks/x402-stacks-facilitator) - Payment verification service
-- [x402 Spec for Stacks](https://github.com/coinbase/x402/blob/main/specs/schemes/exact/scheme_exact_stacks.md) - Protocol specification
+- [x402 Spec for Stacks](https://github.com/aibtcdev/x402/blob/feature/add-stacks-ecosystem/specs/schemes/exact/scheme_exact_stacks.md) - Protocol specification
 
 ### Coinbase x402
 - [x402 Protocol](https://www.x402.org/) - Official site
