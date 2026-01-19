@@ -55,7 +55,7 @@ async function makeStacksPaymentRequest(
   endpoint: string,
   options: {
     method?: "GET" | "POST";
-    body?: unknown;
+    body?: Record<string, unknown>;
     tokenType?: TokenType;
   } = {}
 ) {
@@ -67,14 +67,17 @@ async function makeStacksPaymentRequest(
 
   // Step 1: Make initial request (will get 402)
   console.log("[Stacks Client] Step 1: Initial request...");
-  const initialResponse = await fetch(`${SERVER_URL}${endpoint}`, {
+  const fetchOptions: RequestInit = {
     method,
     headers: {
       "Content-Type": "application/json",
       "X-PAYMENT-TOKEN-TYPE": tokenType,
     },
-    ...(body && { body: JSON.stringify(body) }),
-  });
+  };
+  if (body) {
+    fetchOptions.body = JSON.stringify(body);
+  }
+  const initialResponse = await fetch(`${SERVER_URL}${endpoint}`, fetchOptions);
 
   if (initialResponse.status !== 402) {
     // Either free endpoint or already paid
@@ -109,15 +112,18 @@ async function makeStacksPaymentRequest(
 
     // Step 3: Retry with payment
     console.log("[Stacks Client] Step 4: Retrying with X-PAYMENT header...");
-    const paidResponse = await fetch(`${SERVER_URL}${endpoint}`, {
+    const paidFetchOptions: RequestInit = {
       method,
       headers: {
         "Content-Type": "application/json",
         "X-PAYMENT": signedPayment.signedTransaction,
         "X-PAYMENT-TOKEN-TYPE": tokenType,
       },
-      ...(body && { body: JSON.stringify(body) }),
-    });
+    };
+    if (body) {
+      paidFetchOptions.body = JSON.stringify(body);
+    }
+    const paidResponse = await fetch(`${SERVER_URL}${endpoint}`, paidFetchOptions);
 
     if (!paidResponse.ok) {
       const error = await paidResponse.json();

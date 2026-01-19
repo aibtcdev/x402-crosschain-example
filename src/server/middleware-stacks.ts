@@ -160,7 +160,7 @@ export function stacksPaymentMiddleware(options: StacksPaymentOptions) {
         console.error("[Stacks] Payment invalid:", settleResult);
         return res.status(402).json({
           error: "Payment invalid",
-          details: settleResult.validationError || settleResult.error,
+          details: settleResult.validationError,
           code: "PAYMENT_INVALID",
         });
       }
@@ -170,10 +170,7 @@ export function stacksPaymentMiddleware(options: StacksPaymentOptions) {
         network: "stacks",
         verified: true,
         txId: settleResult.txId,
-        payerAddress:
-          settleResult.senderAddress ||
-          (settleResult as any).sender_address ||
-          (settleResult as any).sender,
+        payerAddress: settleResult.sender,
         tokenType,
         amount: amount.toString(),
       };
