@@ -53,26 +53,22 @@ Different networks offer different advantages. Supporting multiple chains lets u
 
 ## Protocol Versions
 
-The x402 protocol has two versions, both actively used:
+The x402 protocol has two versions, both actively used. All networks use [CAIP-2](https://chainagnostic.org/CAIPs/caip-2) chain identifiers.
 
 | Aspect | v1 | v2 |
 |--------|----|----|
 | **Payment Header** | `X-PAYMENT` | `Payment-Signature` |
-| **Network IDs** | `stacks:1`, custom | CAIP-2 (`eip155:84532`) |
-| **Used By** | Stacks | EVM (Base), Solana |
-| **Status** | Stable, widely deployed | Latest, transport-agnostic |
+| **Network IDs** | CAIP-2 (`stacks:1`, `eip155:1`) | CAIP-2 (`eip155:84532`) |
 
-Both versions follow the same core flow: request → 402 → sign → submit → settle. The difference is header names and payload format.
+| Network | v1 | v2 | Package |
+|---------|----|----|---------|
+| EVM (Base) | [legacy](https://github.com/coinbase/x402/tree/main/typescript/packages/legacy) | ✓ | `@x402/express` |
+| Solana | ✓ | ✓ | `x402-solana` |
+| Stacks | ✓ | This week | `x402-stacks` |
 
-| Network | v1 Support | v2 Support |
-|---------|------------|------------|
-| EVM (Base) | - | ✓ |
-| Solana | ✓ | ✓ |
-| Stacks | ✓ | Coming this week |
+Both versions follow the same flow: request → 402 → sign → submit → settle.
 
-**This repo supports both** - your API can accept payments from v1 and v2 clients simultaneously.
-
-> **Note**: Solana has implementations for both protocol versions. This repo's examples use EVM and Stacks, but Solana follows the same patterns.
+> **Note**: This repo's examples use EVM and Stacks. Solana follows the same patterns—see [x402-solana](https://github.com/PayAINetwork/x402-solana).
 
 ## Architecture
 
@@ -101,53 +97,33 @@ flowchart TB
     STX --> STXF --> STXNET
 ```
 
-## Adding Multi-Version Support
+## Quick Example
 
-Supporting both protocol versions follows a 3-step pattern:
-
-```
-1. CHECK for both payment headers (v2 "Payment-Signature" + v1 "X-PAYMENT")
-2. RETURN 402 with all network options in accepts[] array
-3. ROUTE to appropriate middleware based on which header is present
-```
-
-Your existing clients continue to work unchanged.
-
-**Full integration guide:** [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)
-
-### Quick Example (Express)
+Check for both headers, return 402 with all options, route to the right middleware:
 
 ```typescript
 app.get("/api/data", async (req, res) => {
-  const v2Payment = req.header("payment-signature");  // v2 (EVM, Solana)
-  const v1Payment = req.header("x-payment");          // v1 (Stacks, others)
+  const v2Payment = req.header("payment-signature");  // v2
+  const v1Payment = req.header("x-payment");          // v1
 
-  // No payment? Return 402 with all options
   if (!v2Payment && !v1Payment) {
     return res.status(402).json({
       x402Version: 1,
       accepts: [
-        { scheme: "exact", network: "eip155:84532", /* EVM config */ },
-        { scheme: "exact", network: "stacks:1", /* Stacks config */ },
+        { scheme: "exact", network: "eip155:84532", /* EVM */ },
+        { scheme: "exact", network: "stacks:1", /* Stacks */ },
       ]
     });
   }
 
-  // Route based on protocol version
-  if (v1Payment) {
-    return stacksPaymentMiddleware({ amount: 1000n })(req, res, handler);
-  }
-
-  // v2 handler (EVM/Solana)
-  evmPaymentMiddleware(req, res, handler);
+  if (v1Payment) return stacksMiddleware(req, res, handler);
+  return evmMiddleware(req, res, handler);
 });
 ```
 
-## Payment Flow Comparison
+**Full details:** [Integration Guide](docs/INTEGRATION_GUIDE.md)
 
-Both protocol versions follow the same pattern - the differences are header names and facilitator endpoints.
-
-### v2 Flow (EVM, Solana)
+## Payment Flow
 
 ```mermaid
 sequenceDiagram
@@ -156,35 +132,15 @@ sequenceDiagram
     participant F as Facilitator
 
     C->>S: GET /api/data
-    S-->>C: 402 + payment-required
-    Note over C: Sign with wallet
-    C->>S: GET + Payment-Signature header
-    S->>F: POST /verify
-    F-->>S: verified
-    S->>F: POST /settle
-    F-->>S: settled
-    S-->>C: 200 + data
-```
-
-### v1 Flow (Stacks)
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant S as Server
-    participant F as Facilitator
-
-    C->>S: GET /api/data
-    S-->>C: 402 + payment-required
+    S-->>C: 402 + payment options
     Note over C: Sign transaction
-    C->>S: GET + X-PAYMENT header
-    S->>F: POST /settle
-    Note over F: broadcasts & confirms
-    F-->>S: settled
+    C->>S: GET + payment header
+    S->>F: verify & settle
+    F-->>S: confirmed
     S-->>C: 200 + data
 ```
 
-**Same pattern, different headers**: v2 uses `Payment-Signature`, v1 uses `X-PAYMENT`. Both use 402 responses with `accepts[]` arrays.
+Both versions use the same flow. v2 sends `Payment-Signature`, v1 sends `X-PAYMENT`.
 
 ## Endpoints
 

@@ -4,33 +4,25 @@ This guide shows how to support **both x402 protocol versions** in your applicat
 
 ## Protocol Versions
 
-The x402 protocol has two versions, both actively used:
+The x402 protocol has two versions. Both use [CAIP-2](https://chainagnostic.org/CAIPs/caip-2) chain identifiers (e.g., `eip155:84532`, `stacks:1`).
 
 | Version | Header | Spec |
 |---------|--------|------|
 | **v1** | `X-PAYMENT` | [x402-specification-v1.md](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v1.md) |
 | **v2** | `Payment-Signature` | [x402-specification-v2.md](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md) |
 
-Both versions follow the same core flow. The difference is header names and network ID format.
+## Network & Package Support
 
-| Network | v1 (`X-PAYMENT`) | v2 (`Payment-Signature`) |
-|---------|------------------|--------------------------|
-| EVM (Base) | - | ✓ |
-| Solana | ✓ | ✓ |
-| Stacks | ✓ | Coming this week |
+| Network | v1 | v2 | Package |
+|---------|----|----|---------|
+| EVM (Base) | [legacy](https://github.com/coinbase/x402/tree/main/typescript/packages/legacy) | ✓ | `@x402/express`, `@x402/fetch` |
+| Solana | ✓ | ✓ | `x402-solana` |
+| Stacks | ✓ | This week | `x402-stacks` |
 
-## Quick Reference
-
-| Component | v2 | v1 |
-|-----------|----|----|
-| **Payment Header** | `Payment-Signature` | `X-PAYMENT` |
-| **Network ID Format** | CAIP-2 (`eip155:84532`) | Custom (`stacks:1`) |
-| **EVM Package** | `@x402/express`, `@x402/fetch` | - |
-| **Solana Package** | `x402-solana` | `x402-solana` |
-| **Stacks Package** | Coming this week | `x402-stacks` |
-| **Facilitator** | x402.org | stacksx402.com |
-
-> **Note**: Solana's `x402-solana` package supports both `Payment-Signature` and `X-PAYMENT` headers. Stacks currently supports v1 only, with v2 support coming this week.
+| Facilitator | Networks |
+|-------------|----------|
+| x402.org | EVM, Solana |
+| facilitator.stacksx402.com | Stacks |
 
 ## The 3-Step Pattern
 
@@ -422,9 +414,10 @@ npm run client:stacks
 - [Stacks Scheme Spec](https://github.com/aibtcdev/x402/blob/feature/add-stacks-ecosystem/specs/schemes/exact/scheme_exact_stacks.md) - Stacks-specific details
 
 ### Libraries
-- [x402-stacks NPM](https://www.npmjs.com/package/x402-stacks) - v1 TypeScript client/server (v2 coming this week)
-- [@x402/express](https://www.npmjs.com/package/@x402/express) - v2 Express middleware
-- [x402-solana](https://github.com/PayAINetwork/x402-solana) - v1 + v2 Solana implementation
+- [x402-stacks](https://www.npmjs.com/package/x402-stacks) - Stacks v1 + v2 (v2 this week)
+- [@x402/express](https://www.npmjs.com/package/@x402/express) - EVM v2
+- [@x402/legacy](https://github.com/coinbase/x402/tree/main/typescript/packages/legacy) - EVM v1
+- [x402-solana](https://github.com/PayAINetwork/x402-solana) - Solana v1 + v2
 
 ### Services
 - [Stacks Facilitator](https://facilitator.stacksx402.com) - v1 payment verification

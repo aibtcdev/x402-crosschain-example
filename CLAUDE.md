@@ -8,20 +8,20 @@ Cross-chain x402 payment example demonstrating how to support both x402 protocol
 
 ## Protocol Versions
 
-The x402 protocol has two versions:
+The x402 protocol has two versions. All use CAIP-2 chain IDs (`eip155:84532`, `stacks:1`).
 
-| Version | Header | Spec |
-|---------|--------|------|
-| v1 | `X-PAYMENT` | [x402-specification-v1.md](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v1.md) |
-| v2 | `Payment-Signature` | [x402-specification-v2.md](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md) |
+| Version | Header |
+|---------|--------|
+| v1 | `X-PAYMENT` |
+| v2 | `Payment-Signature` |
 
-| Network | v1 | v2 |
-|---------|----|----|
-| EVM (Base) | - | ✓ |
-| Solana | ✓ | ✓ |
-| Stacks | ✓ | Coming this week |
+| Network | v1 | v2 | Package |
+|---------|----|----|---------|
+| EVM (Base) | legacy | ✓ | `@x402/express` |
+| Solana | ✓ | ✓ | `x402-solana` |
+| Stacks | ✓ | This week | `x402-stacks` |
 
-Both versions follow the same core flow: request → 402 → sign → submit → settle.
+Both versions follow the same flow: request → 402 → sign → submit → settle.
 
 ## Commands
 
