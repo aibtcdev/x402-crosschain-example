@@ -10,10 +10,16 @@ Cross-chain x402 payment example demonstrating how to support both x402 protocol
 
 The x402 protocol has two versions:
 
-| Version | Header | Networks | Spec |
-|---------|--------|----------|------|
-| v1 | `X-PAYMENT` | Stacks, others | [x402-specification-v1.md](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v1.md) |
-| v2 | `Payment-Signature` | EVM (Base), Solana | [x402-specification-v2.md](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md) |
+| Version | Header | Spec |
+|---------|--------|------|
+| v1 | `X-PAYMENT` | [x402-specification-v1.md](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v1.md) |
+| v2 | `Payment-Signature` | [x402-specification-v2.md](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md) |
+
+| Network | v1 | v2 |
+|---------|----|----|
+| EVM (Base) | - | ✓ |
+| Solana | ✓ | ✓ |
+| Stacks | ✓ | Coming this week |
 
 Both versions follow the same core flow: request → 402 → sign → submit → settle.
 

@@ -59,37 +59,46 @@ The x402 protocol has two versions, both actively used:
 |--------|----|----|
 | **Payment Header** | `X-PAYMENT` | `Payment-Signature` |
 | **Network IDs** | `stacks:1`, custom | CAIP-2 (`eip155:84532`) |
-| **Used By** | Stacks, others | Coinbase EVM, Solana |
+| **Used By** | Stacks | EVM (Base), Solana |
 | **Status** | Stable, widely deployed | Latest, transport-agnostic |
 
 Both versions follow the same core flow: request → 402 → sign → submit → settle. The difference is header names and payload format.
 
+| Network | v1 Support | v2 Support |
+|---------|------------|------------|
+| EVM (Base) | - | ✓ |
+| Solana | ✓ | ✓ |
+| Stacks | ✓ | Coming this week |
+
 **This repo supports both** - your API can accept payments from v1 and v2 clients simultaneously.
 
-> **Coming soon**: The [Stacks facilitator](https://github.com/x402Stacks/x402-stacks-facilitator) is adding Coinbase-compatible v2 endpoints, enabling unified cross-chain flows.
+> **Note**: Solana has implementations for both protocol versions. This repo's examples use EVM and Stacks, but Solana follows the same patterns.
 
 ## Architecture
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                                        Your API                                         │
-│  ┌───────────────────┐    ┌────────────────────┐    ┌───────────────────┐              │
-│  │   EVM Middleware  │    │  Solana Middleware │    │  Stacks Middleware │              │
-│  │  (@x402/express)  │    │   (x402-solana)    │    │   (x402-stacks)    │              │
-│  └─────────┬─────────┘    └─────────┬──────────┘    └─────────┬─────────┘              │
-└────────────┼────────────────────────┼─────────────────────────┼────────────────────────┘
-             │                        │                         │
-             ▼                        ▼                         ▼
-┌────────────────────────┐  ┌────────────────────────┐  ┌─────────────────────────────┐
-│    EVM Facilitator     │  │   Solana Facilitator   │  │     Stacks Facilitator      │
-│  x402.org/facilitator  │  │  x402.org/facilitator  │  │ facilitator.stacksx402.com  │
-└────────────────────────┘  └────────────────────────┘  └─────────────────────────────┘
-             │                        │                         │
-             ▼                        ▼                         ▼
-┌────────────────────────┐  ┌────────────────────────┐  ┌─────────────────────────────┐
-│     Base Network       │  │    Solana Network      │  │      Stacks Network         │
-│        (USDC)          │  │     (USDC / SOL)       │  │    (STX / sBTC / USDCx)     │
-└────────────────────────┘  └────────────────────────┘  └─────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph API["Your API"]
+        EVM["EVM Middleware<br/>(@x402/express)"]
+        SOL["Solana Middleware<br/>(x402-solana)"]
+        STX["Stacks Middleware<br/>(x402-stacks)"]
+    end
+
+    subgraph Facilitators
+        EVMF["EVM Facilitator<br/>x402.org/facilitator"]
+        SOLF["Solana Facilitator<br/>x402.org/facilitator"]
+        STXF["Stacks Facilitator<br/>facilitator.stacksx402.com"]
+    end
+
+    subgraph Networks
+        BASE["Base Network<br/>(USDC)"]
+        SOLNET["Solana Network<br/>(USDC / SOL)"]
+        STXNET["Stacks Network<br/>(STX / sBTC / USDCx)"]
+    end
+
+    EVM --> EVMF --> BASE
+    SOL --> SOLF --> SOLNET
+    STX --> STXF --> STXNET
 ```
 
 ## Adding Multi-Version Support
@@ -139,47 +148,40 @@ app.get("/api/data", async (req, res) => {
 Both protocol versions follow the same pattern - the differences are header names and facilitator endpoints.
 
 ### v2 Flow (EVM, Solana)
-```
-Client                    Server                   Facilitator
-  │                         │                          │
-  │ GET /api/data           │                          │
-  │────────────────────────>│                          │
-  │                         │                          │
-  │ 402 + payment-required  │                          │
-  │<────────────────────────│                          │
-  │                         │                          │
-  │ Sign with wallet        │                          │
-  │                         │                          │
-  │ GET + Payment-Signature │                          │
-  │────────────────────────>│ POST /verify            │
-  │                         │─────────────────────────>│
-  │                         │<─────────────────────────│
-  │                         │ POST /settle            │
-  │                         │─────────────────────────>│
-  │                         │<─────────────────────────│
-  │ 200 + data              │                          │
-  │<────────────────────────│                          │
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant F as Facilitator
+
+    C->>S: GET /api/data
+    S-->>C: 402 + payment-required
+    Note over C: Sign with wallet
+    C->>S: GET + Payment-Signature header
+    S->>F: POST /verify
+    F-->>S: verified
+    S->>F: POST /settle
+    F-->>S: settled
+    S-->>C: 200 + data
 ```
 
-### v1 Flow (Stacks, others)
-```
-Client                    Server                   Facilitator
-  │                         │                          │
-  │ GET /api/data           │                          │
-  │────────────────────────>│                          │
-  │                         │                          │
-  │ 402 + payment-required  │                          │
-  │<────────────────────────│                          │
-  │                         │                          │
-  │ Sign transaction        │                          │
-  │                         │                          │
-  │ GET + X-PAYMENT header  │                          │
-  │────────────────────────>│ POST /settle            │
-  │                         │─────────────────────────>│
-  │                         │ (broadcasts & confirms)  │
-  │                         │<─────────────────────────│
-  │ 200 + data              │                          │
-  │<────────────────────────│                          │
+### v1 Flow (Stacks)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant F as Facilitator
+
+    C->>S: GET /api/data
+    S-->>C: 402 + payment-required
+    Note over C: Sign transaction
+    C->>S: GET + X-PAYMENT header
+    S->>F: POST /settle
+    Note over F: broadcasts & confirms
+    F-->>S: settled
+    S-->>C: 200 + data
 ```
 
 **Same pattern, different headers**: v2 uses `Payment-Signature`, v1 uses `X-PAYMENT`. Both use 402 responses with `accepts[]` arrays.
