@@ -221,14 +221,13 @@ Both PayAI's `x402-solana` and Solana Foundation's `x402-next` handle both versi
 # Start your server
 npm run dev
 
-# Test Solana payment (should work as before)
-npm run client:solana
-
-# Test Stacks payment (new)
+# Test Stacks payment
 npm run client:stacks
 
 # Check 402 response shows both networks
 curl http://localhost:3000/api/data | jq '.accepts[].network'
+
+# For Solana testing, use your existing Solana client
 ```
 
 ---

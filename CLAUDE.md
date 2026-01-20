@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Cross-chain x402 payment example demonstrating how to support both x402 protocol versions (v1 and v2) on EVM (Base), Solana, and Stacks networks. This is a reference implementation showing how existing x402 apps can add multi-version support with minimal code changes.
+Reference implementation for adding **Stacks payment support** to existing x402 apps. Whether developers are on EVM (Base) or Solana, this repo shows the integration pattern for accepting STX, sBTC, and USDCx payments.
 
 ## Protocol Versions
 
@@ -121,7 +121,9 @@ Tokens configured in `middleware-stacks.ts` with mainnet/testnet contracts for s
 
 ## Resources
 
-- [Integration Guide](docs/INTEGRATION_GUIDE.md) - Step-by-step for supporting both protocol versions
-- [x402-stacks NPM](https://www.npmjs.com/package/x402-stacks) - v1 TypeScript client/server
-- [Stacks Facilitator](https://github.com/x402Stacks/x402-stacks-facilitator) - v1 payment verification
-- [Sponsor Relay](https://github.com/aibtcdev/x402-sponsor-relay) - Gasless transactions for Stacks (coming soon)
+- [Add Stacks to EVM](docs/FROM_EVM.md) - For Base developers
+- [Add Stacks to Solana](docs/FROM_SOLANA.md) - For Solana developers
+- [Getting Started](docs/GETTING_STARTED.md) - Build Stacks x402 from scratch
+- [x402-stacks NPM](https://www.npmjs.com/package/x402-stacks) - TypeScript client/server
+- [Stacks Facilitator](https://github.com/x402Stacks/x402-stacks-facilitator) - Payment verification
+- [Sponsor Relay](https://github.com/aibtcdev/x402-sponsor-relay) - Gasless transactions for Stacks
