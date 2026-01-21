@@ -1,12 +1,13 @@
 /**
- * x402 Cross-Chain Example Server (Hono)
+ * x402 Cross-Chain Example Server (Hono) - v2 Protocol
  *
- * This example shows how to add Stacks support to an existing x402 Hono app.
- * If you're coming from EVM (Base) or Solana, the key patterns are:
+ * This example shows how to add Stacks support to an existing x402 Hono app using v2 protocol.
+ * Both EVM and Stacks now use the unified "Payment-Signature" header format.
  *
- * 1. HEADERS: Stacks uses "X-PAYMENT" header (vs "Payment-Signature" for EVM)
- * 2. 402 RESPONSE: Return accepts[] array with BOTH network options
- * 3. ROUTING: Check header format to route to correct middleware
+ * v2 Key Changes:
+ * - Header: Unified "Payment-Signature" for all networks (base64 JSON)
+ * - 402 response: Uses "amount" and separate "resource" object
+ * - Routing: Based on decoded payload's "network" field (CAIP-2 format)
  *
  * This is the Hono equivalent of the Express server in src/server/.
  * See docs/INTEGRATION_GUIDE.md for step-by-step integration instructions.
@@ -33,6 +34,8 @@ import {
   STACKS_NETWORK_IDS,
   DEFAULT_ACCEPTED_TOKENS,
   DEFAULT_TIMEOUT_SECONDS,
+  decodePaymentSignature,
+  getAssetIdentifier,
 } from "../shared/stacks-config.js";
 
 config();
@@ -43,7 +46,7 @@ type AppVariables = X402Variables & EvmX402Variables;
 const app = new Hono<{ Variables: AppVariables }>();
 
 // =============================================================================
-// CORS Configuration
+// CORS Configuration (v2: unified headers)
 // =============================================================================
 
 app.use(
@@ -51,9 +54,7 @@ app.use(
   cors({
     origin: "*",
     allowHeaders: [
-      "X-PAYMENT",
-      "X-PAYMENT-TOKEN-TYPE",
-      "Payment-Signature",
+      "Payment-Signature", // v2: unified header for all networks
       "Content-Type",
     ],
     exposeHeaders: ["X-PAYMENT-RESPONSE", "X-PAYER-ADDRESS"],
@@ -154,96 +155,109 @@ app.post(
 );
 
 // =============================================================================
-// Cross-Chain Endpoint (accept EITHER EVM or Stacks)
+// Cross-Chain Endpoint (accept EITHER EVM or Stacks) - v2 Protocol
 // =============================================================================
 //
 // THIS IS THE KEY PATTERN FOR ADDING STACKS TO YOUR EXISTING x402 HONO APP
 //
-// If you're coming from:
-//   - EVM (Base): You already use "Payment-Signature" header and @x402/hono
-//   - Solana: You use similar patterns with x402-solana
-//
-// To add Stacks support, you need to:
-//   1. Check for BOTH header types (Stacks uses "X-PAYMENT")
-//   2. Return 402 response with BOTH networks in accepts[] array
-//   3. Route to appropriate middleware based on which header is present
+// v2 simplifies cross-chain support:
+//   1. All networks use unified "Payment-Signature" header (base64 JSON)
+//   2. Return v2 402 response with "resource" object and "amount" field
+//   3. Route based on decoded payload's "network" field (CAIP-2 format)
 // =============================================================================
 
 app.get("/weather", async (c) => {
   // ---------------------------------------------------------------------------
-  // STEP 1: Check for payment headers from BOTH networks
+  // STEP 1: Check for unified Payment-Signature header (v2)
   // ---------------------------------------------------------------------------
-  // EVM/Base uses: "Payment-Signature" header (from @x402/hono)
-  // Solana uses:   Similar header pattern (from x402-solana)
-  // Stacks uses:   "X-PAYMENT" header (from x402-stacks)
+  // v2: All networks use the same header format (base64-encoded JSON)
+  // The payload contains the network identifier for routing
   // ---------------------------------------------------------------------------
-  const evmPayment = c.req.header("payment-signature");
-  const stacksPayment = c.req.header("x-payment");
+  const paymentSignature = c.req.header("payment-signature");
 
   // ---------------------------------------------------------------------------
-  // STEP 2: If no payment, return 402 with BOTH network options
+  // STEP 2: If no payment, return v2 402 with BOTH network options
   // ---------------------------------------------------------------------------
-  // This is the x402-compliant response format. Clients parse the accepts[]
-  // array and choose their preferred network. Your existing EVM/Solana clients
-  // will still work - they just pick the network they support.
+  // v2 format uses separate "resource" object and "amount" instead of inline
   // ---------------------------------------------------------------------------
-  if (!evmPayment && !stacksPayment) {
-    const nonce = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + DEFAULT_TIMEOUT_SECONDS * 1000).toISOString();
-
-    return c.json({
-      x402Version: 1,
-      error: "Payment Required",
-      accepts: [
-        // YOUR EXISTING EVM OPTION (keep this as-is from your current implementation)
-        {
-          scheme: "exact",
-          network: evmConfig.network,              // "eip155:84532" for Base Sepolia
-          maxAmountRequired: "1000",               // Amount in smallest unit
-          asset: evmConfig.asset,                  // USDC contract address
-          payTo: evmConfig.payTo,                  // Your EVM wallet address
-          resource: c.req.path,
+  if (!paymentSignature) {
+    return c.json(
+      {
+        x402Version: 2,
+        error: "Payment Required",
+        resource: {
+          url: c.req.path,
           description: "Weather data for a city",
-          maxTimeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
-          extra: {
-            facilitator: evmConfig.facilitatorUrl, // EVM facilitator URL
-          },
+          mimeType: "application/json",
         },
-        // NEW: ADD THIS STACKS OPTION to enable Stacks payments
-        {
-          scheme: "exact",
-          network: STACKS_NETWORK_IDS[stacksConfig.network], // "stacks:1" or "stacks:2147483648"
-          maxAmountRequired: "1000",               // Amount in microSTX (1000 = 0.001 STX)
-          asset: "STX",                            // Native STX token
-          payTo: stacksConfig.payTo,               // Your Stacks wallet address
-          resource: c.req.path,
-          description: "Weather data for a city",
-          maxTimeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
-          extra: {
-            // Stacks-specific fields that x402-stacks client uses
-            nonce,                                 // Unique request ID
-            expiresAt,                             // Payment expiration
-            tokenType: "STX",                      // Which token to pay with
-            acceptedTokens: DEFAULT_ACCEPTED_TOKENS, // ["STX", "sBTC", "USDCx"]
-            facilitator: stacksConfig.facilitatorUrl,
+        accepts: [
+          // EVM OPTION (Base)
+          {
+            scheme: "exact",
+            network: evmConfig.network, // "eip155:84532" for Base Sepolia
+            asset: evmConfig.asset, // USDC contract address
+            amount: "1000", // v2: "amount" not "maxAmountRequired"
+            payTo: evmConfig.payTo,
+            maxTimeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
+            extra: {
+              facilitator: evmConfig.facilitatorUrl,
+            },
           },
-        },
-      ],
-    }, 402);
+          // STACKS OPTION (STX)
+          {
+            scheme: "exact",
+            network: STACKS_NETWORK_IDS[stacksConfig.network], // "stacks:1" or "stacks:2147483648"
+            asset: "STX",
+            amount: "1000", // Amount in microSTX
+            payTo: stacksConfig.payTo,
+            maxTimeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
+            extra: {
+              facilitator: stacksConfig.facilitatorUrl,
+              tokenType: "STX",
+              acceptedTokens: DEFAULT_ACCEPTED_TOKENS,
+            },
+          },
+          // STACKS OPTION (sBTC)
+          {
+            scheme: "exact",
+            network: STACKS_NETWORK_IDS[stacksConfig.network],
+            asset: getAssetIdentifier("sBTC", stacksConfig.network),
+            amount: "100", // Amount in satoshis
+            payTo: stacksConfig.payTo,
+            maxTimeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
+            extra: {
+              facilitator: stacksConfig.facilitatorUrl,
+              tokenType: "sBTC",
+              acceptedTokens: DEFAULT_ACCEPTED_TOKENS,
+            },
+          },
+        ],
+      },
+      402
+    );
   }
 
   // ---------------------------------------------------------------------------
-  // STEP 3: Route to appropriate middleware based on payment header
+  // STEP 3: Decode payload and route based on network (v2)
   // ---------------------------------------------------------------------------
-  // Stacks transactions are hex-encoded and longer than EVM signatures.
-  // Check for Stacks payment first, then fall through to your existing EVM handler.
+  // v2: Decode base64 JSON to determine which network the payment is for
   // ---------------------------------------------------------------------------
-
-  // Detect Stacks payment: longer payload or starts with "0x" (hex-encoded tx)
-  const isStacksPayment = stacksPayment && (stacksPayment.length > 500 || stacksPayment.startsWith("0x"));
+  let isStacksPayment = false;
+  try {
+    const payload = decodePaymentSignature(paymentSignature);
+    isStacksPayment = payload.accepted.network.startsWith("stacks:");
+  } catch (error) {
+    return c.json(
+      {
+        error: "Invalid Payment-Signature header",
+        details: "Expected base64-encoded JSON payload",
+      },
+      400
+    );
+  }
 
   if (isStacksPayment) {
-    // Route to Stacks middleware (from x402-stacks package)
+    // Route to Stacks v2 middleware
     const middleware = stacksPaymentMiddleware({
       amount: 1000n,
       description: "Weather data for a city",

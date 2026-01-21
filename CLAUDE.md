@@ -6,22 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Reference implementation for adding **Stacks payment support** to existing x402 apps. Whether developers are on EVM (Base) or Solana, this repo shows the integration pattern for accepting STX, sBTC, and USDCx payments.
 
-## Protocol Versions
+## Protocol Version
 
-The x402 protocol has two versions. All use CAIP-2 chain IDs (`eip155:84532`, `stacks:1`).
+This implementation uses **x402 v2 protocol exclusively**. All networks use the unified `Payment-Signature` header format (base64-encoded JSON).
 
-| Version | Header |
-|---------|--------|
-| v1 | `X-PAYMENT` |
-| v2 | `Payment-Signature` |
+| Network | v2 | Package |
+|---------|----|----|
+| EVM (Base) | ✓ | `@x402/express` |
+| Solana | ✓ | `x402-solana` |
+| Stacks | ✓ | `x402-stacks` |
 
-| Network | v1 | v2 | Package |
-|---------|----|----|---------|
-| EVM (Base) | ✓ | ✓ | `@x402/express` |
-| Solana | ✓ | ✓ | `x402-solana` |
-| Stacks | ✓ | This week | `x402-stacks` |
-
-Both versions follow the same flow: request → 402 → sign → submit → settle.
+All networks use CAIP-2 chain IDs (`eip155:84532`, `stacks:1`, `stacks:2147483648`).
 
 ## Commands
 
@@ -40,39 +35,45 @@ npm run check         # TypeScript type checking
 ### Express Server (`src/server/`)
 
 - **index.ts**: Express server with three endpoint types:
-  - `/evm/*` - v2 EVM-only endpoints using `@x402/express` pattern
-  - `/stacks/*` - v1 Stacks-only endpoints using `x402-stacks`
-  - `/weather` - Cross-chain endpoint accepting both protocol versions
+  - `/evm/*` - EVM-only endpoints using `@x402/express` pattern
+  - `/stacks/*` - Stacks-only endpoints using v2 middleware
+  - `/weather` - Cross-chain endpoint accepting both EVM and Stacks
 
-- **middleware-evm.ts**: v2 EVM payment middleware (simplified demo; production would use `@x402/express`)
+- **middleware-evm.ts**: Simplified EVM payment middleware (demo; production would use `@x402/express`)
 
-- **middleware-stacks.ts**: v1 Stacks payment middleware using `X402PaymentVerifier` from `x402-stacks`. Supports STX, sBTC, and USDCx tokens.
+- **middleware-stacks.ts**: v2 Stacks payment middleware. Decodes `Payment-Signature` header, calls facilitator `/settle` endpoint. Supports STX, sBTC, and USDCx tokens.
 
 ### Hono Server (`src/server-hono/`)
 
 Hono implementation with identical functionality to Express. Based on [aibtcdev/x402-api](https://github.com/aibtcdev/x402-api).
 
 - **index.ts**: Hono server with same endpoint structure as Express
-- **middleware-stacks.ts**: Hono-native v1 Stacks middleware using `c.set("x402", ...)` for context
-- **middleware-evm.ts**: Simplified v2 EVM middleware (production would use `@x402/hono`)
+- **middleware-stacks.ts**: Hono-native v2 Stacks middleware using `c.set("x402", ...)` for context
+- **middleware-evm.ts**: Simplified EVM middleware (production would use `@x402/hono`)
+
+### Shared (`src/shared/`)
+
+- **stacks-config.ts**: v2 types, configuration, and helper functions for Stacks payments
 
 ### Client (`src/client/`)
 
-- **evm-client.ts**: v2 EVM payment flow demo (production would use `wrapFetchWithPayment` from `@x402/fetch`)
+- **evm-client.ts**: EVM payment flow demo (production would use `wrapFetchWithPayment` from `@x402/fetch`)
 
-- **stacks-client.ts**: v1 Stacks payment flow using `X402PaymentClient` from `x402-stacks`
+- **stacks-client.ts**: v2 Stacks payment flow. Parses v2 402 response, signs with `X402PaymentClient`, builds v2 payload, and sends `Payment-Signature` header.
 
-## x402 Payment Flow
+## x402 v2 Payment Flow
 
-1. Client requests endpoint → Server returns 402 with payment requirements
-2. Client signs transaction (EVM or Stacks)
-3. Client retries with payment header (v2: `Payment-Signature`, v1: `X-PAYMENT`)
-4. Server verifies via facilitator and settles payment
-5. Server returns data with confirmation headers
+1. Client requests endpoint → Server returns 402 with v2 payment requirements
+2. Client parses `accepts[]` array and selects payment option by network
+3. Client signs transaction (uses `x402-stacks` for signing)
+4. Client builds v2 `PaymentPayloadV2` and base64 encodes
+5. Client retries with `Payment-Signature` header
+6. Server decodes payload, routes by network, settles via facilitator
+7. Server returns data with confirmation headers
 
 ## Key Dependencies
 
-- `x402-stacks` - v1 Stacks payment client/verifier
+- `x402-stacks` - Stacks transaction signing (used with v2 protocol)
 - `@x402/express`, `@x402/hono`, `@x402/fetch`, `@x402/evm` - v2 Coinbase x402 for EVM
 - `hono`, `@hono/node-server` - Hono framework
 
@@ -84,7 +85,7 @@ SERVER_ADDRESS_STACKS=SP...        # Stacks address to receive payments
 STACKS_NETWORK=testnet             # testnet or mainnet
 EVM_RPC_URL=https://sepolia.base.org
 EVM_FACILITATOR_URL=https://x402.org/facilitator      # v2 facilitator
-STACKS_FACILITATOR_URL=https://facilitator.stacksx402.com  # v1 facilitator
+STACKS_FACILITATOR_URL=https://facilitator.stacksx402.com  # v2 facilitator (/settle, /verify)
 
 # Client testing
 CLIENT_PRIVATE_KEY_EVM=...
@@ -92,26 +93,79 @@ CLIENT_MNEMONIC_STACKS=...
 CLIENT_PRIVATE_KEY_STACKS=...
 ```
 
-## Multi-Version Detection Pattern
+## v2 Cross-Chain Routing Pattern
 
-The key pattern for supporting both protocol versions on a single endpoint (see `index.ts`):
+The key pattern for supporting multiple networks on a single endpoint (see `index.ts`):
 
 ```typescript
-const v2Payment = req.header("payment-signature");  // v2 (EVM, Solana)
-const v1Payment = req.header("x-payment");          // v1 (Stacks, others)
+// v2: Unified header for all networks
+const paymentSignature = req.header("payment-signature");
 
-if (!v2Payment && !v1Payment) {
-  // Return 402 with all network options
+if (!paymentSignature) {
+  // Return v2 402 with all network options
+  return res.status(402).json({
+    x402Version: 2,
+    resource: { url: req.path, description: "...", mimeType: "application/json" },
+    accepts: [
+      { scheme: "exact", network: "eip155:84532", amount: "1000", ... },
+      { scheme: "exact", network: "stacks:2147483648", amount: "1000", ... },
+    ],
+  });
 }
-if (v1Payment) {
-  // Route to v1 middleware (Stacks)
+
+// Decode payload to determine network
+const payload = decodePaymentSignature(paymentSignature);
+const isStacks = payload.accepted.network.startsWith("stacks:");
+
+if (isStacks) {
+  // Route to Stacks middleware
 }
-// Fall through to v2 middleware (EVM)
+// Fall through to EVM middleware
+```
+
+## v2 402 Response Format
+
+```json
+{
+  "x402Version": 2,
+  "error": "Payment Required",
+  "resource": {
+    "url": "/api/data",
+    "description": "Protected resource",
+    "mimeType": "application/json"
+  },
+  "accepts": [{
+    "scheme": "exact",
+    "network": "stacks:2147483648",
+    "asset": "STX",
+    "amount": "1000",
+    "payTo": "SP...",
+    "maxTimeoutSeconds": 300,
+    "extra": {
+      "facilitator": "https://facilitator.stacksx402.com",
+      "tokenType": "STX",
+      "acceptedTokens": ["STX", "sBTC", "USDCx"]
+    }
+  }]
+}
+```
+
+## v2 Payment-Signature Header
+
+Base64-encoded JSON:
+
+```json
+{
+  "x402Version": 2,
+  "resource": { "url": "/api/data", "description": "...", "mimeType": "..." },
+  "accepted": { "scheme": "exact", "network": "stacks:2147483648", "amount": "1000", ... },
+  "payload": { "transaction": "0x..." }
+}
 ```
 
 ## Stacks Token Support
 
-Tokens configured in `middleware-stacks.ts` with mainnet/testnet contracts for sBTC and USDCx. Client specifies token via `X-PAYMENT-TOKEN-TYPE` header.
+Tokens configured in `stacks-config.ts` with mainnet/testnet contracts. Token type is embedded in `extra.tokenType` field.
 
 | Token | Description |
 |-------|-------------|
