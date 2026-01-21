@@ -1,30 +1,35 @@
 /**
- * Stacks Payment Middleware (using x402-stacks)
+ * Stacks Payment Middleware v2 (x402 Protocol v2)
  *
- * This shows how to add Stacks payment support to an x402 app.
- * The pattern mirrors the EVM middleware, making it easy to understand.
+ * This shows how to add Stacks payment support to an x402 app using v2 protocol.
+ * Uses the unified Payment-Signature header format matching @x402/core.
  *
- * Returns x402-compliant 402 responses per the Stacks scheme specification:
- * https://github.com/coinbase/x402/pull/962
+ * v2 Changes from v1:
+ * - Header: Payment-Signature (base64 JSON) instead of X-PAYMENT (raw hex)
+ * - Token type: Embedded in payload.accepted.extra.tokenType instead of X-PAYMENT-TOKEN-TYPE header
+ * - 402 response: Uses "amount" and separate "resource" object instead of "maxAmountRequired" inline
+ * - Facilitator: /settle endpoint instead of /api/v1/settle
  */
 
 import { Request, Response, NextFunction } from "express";
-import { X402PaymentVerifier } from "x402-stacks";
 import type { TokenType } from "x402-stacks";
 import {
   stacksConfig,
   STACKS_NETWORK_IDS,
-  getAssetIdentifier,
-  getTokenContract,
   safeStringify,
   DEFAULT_ACCEPTED_TOKENS,
   DEFAULT_TIMEOUT_SECONDS,
+  decodePaymentSignature,
+  build402ResponseV2,
+  settleWithFacilitatorV2,
   type StacksPaymentOptions,
   type X402Context,
+  type PaymentPayloadV2,
+  type PaymentRequirementsV2,
 } from "../shared/stacks-config.js";
 
 // Re-export for use in index.ts
-export { stacksConfig, STACKS_NETWORK_IDS };
+export { stacksConfig, STACKS_NETWORK_IDS, build402ResponseV2 };
 
 // Extend Express Request
 declare global {
@@ -40,9 +45,9 @@ declare global {
 // =============================================================================
 
 /**
- * Stacks Payment Middleware
+ * Stacks Payment Middleware (v2 Protocol)
  *
- * Creates Express middleware that requires x402 payment on Stacks.
+ * Creates Express middleware that requires x402 payment on Stacks using v2 protocol.
  *
  * @example
  * ```typescript
@@ -65,8 +70,44 @@ export function stacksPaymentMiddleware(options: StacksPaymentOptions) {
   } = options;
 
   return async (req: Request, res: Response, next: NextFunction) => {
-    const signedTx = req.header("x-payment");
-    const tokenType = (req.header("x-payment-token-type") || "STX") as TokenType;
+    // v2: Use Payment-Signature header (base64 JSON)
+    const paymentSignature = req.header("payment-signature");
+
+    if (!paymentSignature) {
+      // Return v2 402 response
+      return res.status(402).json(
+        build402ResponseV2({
+          amount,
+          resource: req.originalUrl || req.path,
+          description,
+          maxTimeoutSeconds,
+          acceptTokens,
+        })
+      );
+    }
+
+    // v2: Decode base64 JSON payload
+    let paymentPayload: PaymentPayloadV2;
+    try {
+      paymentPayload = decodePaymentSignature(paymentSignature);
+    } catch (error) {
+      return res.status(400).json({
+        error: "Invalid Payment-Signature header",
+        details: "Expected base64-encoded JSON payload",
+      });
+    }
+
+    // Validate x402 version
+    if (paymentPayload.x402Version !== 2) {
+      return res.status(400).json({
+        error: "Invalid x402 version",
+        expected: 2,
+        received: paymentPayload.x402Version,
+      });
+    }
+
+    // Extract token type from payload (v2: embedded in extra)
+    const tokenType = (paymentPayload.accepted.extra?.tokenType || "STX") as TokenType;
 
     if (!acceptTokens.includes(tokenType)) {
       return res.status(400).json({
@@ -76,37 +117,33 @@ export function stacksPaymentMiddleware(options: StacksPaymentOptions) {
       });
     }
 
-    if (!signedTx) {
-      return res.status(402).json(
-        build402Response({
-          amount,
-          tokenType,
-          resource: req.originalUrl || req.path,
-          description,
-          maxTimeoutSeconds,
-          acceptTokens,
-        })
-      );
-    }
-
-    // Verify payment with facilitator
-    const verifier = new X402PaymentVerifier(
-      stacksConfig.facilitatorUrl,
-      stacksConfig.network
-    );
+    // Build expected payment requirements for verification
+    const paymentRequirements: PaymentRequirementsV2 = {
+      scheme: "exact",
+      network: paymentPayload.accepted.network,
+      asset: paymentPayload.accepted.asset,
+      amount: amount.toString(),
+      payTo: stacksConfig.payTo,
+      maxTimeoutSeconds,
+      extra: {
+        facilitator: stacksConfig.facilitatorUrl,
+        tokenType,
+        acceptedTokens: acceptTokens,
+      },
+    };
 
     try {
-      const settleResult = await verifier.settlePayment(signedTx, {
-        expectedRecipient: stacksConfig.payTo,
-        minAmount: amount,
-        tokenType,
-      });
+      // v2: Call facilitator settle endpoint
+      const settleResult = await settleWithFacilitatorV2(
+        paymentPayload,
+        paymentRequirements
+      );
 
-      if (!settleResult.isValid) {
-        console.error("[Stacks] Payment invalid:", settleResult);
+      if (!settleResult.success) {
+        console.error("[Stacks v2] Payment invalid:", settleResult);
         return res.status(402).json({
           error: "Payment invalid",
-          details: settleResult.validationError,
+          details: settleResult.errorReason,
           code: "PAYMENT_INVALID",
         });
       }
@@ -115,8 +152,8 @@ export function stacksPaymentMiddleware(options: StacksPaymentOptions) {
       req.x402 = {
         network: "stacks",
         verified: true,
-        txId: settleResult.txId,
-        payerAddress: settleResult.sender,
+        txId: settleResult.transaction,
+        payerAddress: settleResult.payer,
         tokenType,
         amount: amount.toString(),
       };
@@ -128,12 +165,12 @@ export function stacksPaymentMiddleware(options: StacksPaymentOptions) {
       }
 
       console.log(
-        `[Stacks] Payment verified: ${settleResult.txId} from ${req.x402.payerAddress}`
+        `[Stacks v2] Payment verified: ${settleResult.transaction} from ${req.x402.payerAddress}`
       );
 
       next();
     } catch (error) {
-      console.error("[Stacks] Payment verification error:", error);
+      console.error("[Stacks v2] Payment verification error:", error);
       return res.status(502).json({
         error: "Payment verification failed",
         details: error instanceof Error ? error.message : String(error),
@@ -143,88 +180,47 @@ export function stacksPaymentMiddleware(options: StacksPaymentOptions) {
   };
 }
 
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-interface Build402Options {
-  amount: bigint;
-  tokenType: TokenType;
-  resource: string;
-  description: string;
-  maxTimeoutSeconds: number;
-  acceptTokens: TokenType[];
-}
-
-function build402Response(options: Build402Options) {
-  const { amount, tokenType, resource, description, maxTimeoutSeconds, acceptTokens } = options;
-  const nonce = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + maxTimeoutSeconds * 1000).toISOString();
-  const tokenContract = getTokenContract(tokenType, stacksConfig.network);
-
-  return {
-    x402Version: 1,
-    error: "Payment Required",
-    accepts: [
-      {
-        scheme: "exact",
-        network: STACKS_NETWORK_IDS[stacksConfig.network],
-        maxAmountRequired: amount.toString(),
-        asset: getAssetIdentifier(tokenType, stacksConfig.network),
-        payTo: stacksConfig.payTo,
-        resource,
-        description,
-        maxTimeoutSeconds,
-        extra: {
-          nonce,
-          expiresAt,
-          tokenType,
-          ...(tokenContract && { tokenContract }),
-          acceptedTokens: acceptTokens,
-          facilitator: stacksConfig.facilitatorUrl,
-        },
-      },
-    ],
-  };
-}
-
 /**
- * Integration Notes:
+ * Integration Notes (v2 Protocol):
  *
- * This middleware returns x402-compliant 402 responses that match the
- * Coinbase x402 specification with Stacks scheme extensions.
+ * This middleware returns x402-compliant 402 responses matching the
+ * Coinbase x402 v2 specification with Stacks scheme extensions.
  *
- * 402 Response Format:
+ * v2 402 Response Format:
  * {
- *   "x402Version": 1,
+ *   "x402Version": 2,
  *   "error": "Payment Required",
+ *   "resource": {
+ *     "url": "/api/data",
+ *     "description": "Protected resource",
+ *     "mimeType": "application/json"
+ *   },
  *   "accepts": [{
  *     "scheme": "exact",
  *     "network": "stacks:2147483648",  // CAIP-2 format
- *     "maxAmountRequired": "1000",
- *     "asset": "STX",                  // or full contract ID for SIP-010
+ *     "amount": "1000",                // v2: "amount" not "maxAmountRequired"
+ *     "asset": "STX",
  *     "payTo": "SP...",
- *     "resource": "/api/data",
- *     "description": "...",
  *     "maxTimeoutSeconds": 300,
- *     "extra": {                       // Stacks-specific extensions
- *       "nonce": "uuid",
- *       "expiresAt": "ISO-8601",
+ *     "extra": {
+ *       "facilitator": "https://facilitator.stacksx402.com",
  *       "tokenType": "STX",
- *       "acceptedTokens": ["STX", "sBTC", "USDCx"],
- *       "facilitator": "https://facilitator.stacksx402.com"
+ *       "acceptedTokens": ["STX", "sBTC", "USDCx"]
  *     }
  *   }]
+ * }
+ *
+ * v2 Payment-Signature Header (base64 JSON):
+ * {
+ *   "x402Version": 2,
+ *   "resource": { "url": "...", "description": "...", "mimeType": "..." },
+ *   "accepted": { ...selected payment option from accepts[] },
+ *   "payload": { "transaction": "0x..." }
  * }
  *
  * Network Identifiers (CAIP-2):
  * - Mainnet: "stacks:1"
  * - Testnet: "stacks:2147483648"
- *
- * Asset Identifiers:
- * - STX: "STX" (native token)
- * - sBTC: "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token::sbtc-token"
- * - USDCx: "SP120SBRBQJ00MCWS7TM5R8WJNTTKD5K0HFRC2CNE.usdcx::usdcx"
  *
  * See:
  * - Stacks scheme spec: https://github.com/coinbase/x402/pull/962
