@@ -165,7 +165,7 @@ export function stacksPaymentMiddleware(options: StacksPaymentOptions) {
       }
 
       console.log(
-        `[Stacks v2] Payment verified: ${settleResult.transaction} from ${req.x402.payerAddress}`
+        `[Stacks v2] Payment verified: ${settleResult.transaction} from ${req.x402.payerAddress || "unknown"}`
       );
 
       next();

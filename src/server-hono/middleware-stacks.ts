@@ -181,7 +181,7 @@ export function stacksPaymentMiddleware<
       }
 
       console.log(
-        `[Stacks v2] Payment verified: ${settleResult.transaction} from ${x402Context.payerAddress}`
+        `[Stacks v2] Payment verified: ${settleResult.transaction} from ${x402Context.payerAddress || "unknown"}`
       );
 
       return next();
