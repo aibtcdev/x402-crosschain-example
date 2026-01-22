@@ -170,6 +170,8 @@ if (v1Payment && (v1Payment.startsWith("0x") || v1Payment.length > 500)) {
 
 ## Stacks Token Options
 
+Stacks supports multiple tokens. With v2, the token type is embedded in the `extra.tokenType` field:
+
 | Token | Description | Use Case |
 |-------|-------------|----------|
 | `STX` | Native Stacks token | Default, most liquid |
@@ -181,6 +183,7 @@ Configure which you accept:
 ```typescript
 extra: {
   acceptedTokens: ["STX", "sBTC", "USDCx"],
+  tokenType: "STX",  // Default token
 }
 ```
 
@@ -199,10 +202,10 @@ extra: {
 
 | Version | Header | Solana | Stacks |
 |---------|--------|--------|--------|
-| v1 | `X-PAYMENT` | Supported | Supported |
-| v2 | `Payment-Signature` | Supported | Coming soon |
+| v1 | `X-PAYMENT` | ✓ | ✓ |
+| v2 | `Payment-Signature` | ✓ | ✓ |
 
-Both PayAI's `x402-solana` and Solana Foundation's `x402-next` handle both versions.
+Both PayAI's `x402-solana` and Solana Foundation's `x402-next` handle both versions. Stacks now supports v2 with the unified `Payment-Signature` header (base64-encoded JSON payload).
 
 ---
 

@@ -38,29 +38,35 @@ npm run client:stacks # Test Stacks payment
 Adding Stacks to an existing x402 endpoint takes 3 steps:
 
 ```typescript
-// 1. CHECK for Stacks payment header
-const stacksPayment = req.header("x-payment");
+// 1. CHECK for payment header (v2: unified across all networks)
+const paymentSignature = req.header("payment-signature");
 
 // 2. ADD Stacks to your 402 response
 accepts: [
   { /* your existing EVM/Solana option */ },
-  { network: "stacks:1", asset: "STX", ... }  // NEW
+  { scheme: "exact", network: "stacks:2147483648", asset: "STX", amount: "1000", ... }
 ]
 
-// 3. ROUTE Stacks payments to x402-stacks middleware
-if (stacksPayment) return stacksMiddleware(req, res, next);
+// 3. ROUTE by network (decode payload to check network prefix)
+const payload = decodePaymentSignature(paymentSignature);
+if (payload.accepted.network.startsWith("stacks:")) {
+  return stacksMiddleware(req, res, next);
+}
 ```
 
 Your existing clients continue working unchanged. Stacks clients get a new payment option.
 
-## Protocol Versions
+## Protocol Version
 
-| Version | Header | Stacks Support |
-|---------|--------|----------------|
-| v1 | `X-PAYMENT` | Available now |
-| v2 | `Payment-Signature` | Coming soon |
+This implementation uses **x402 v2 protocol** with the unified `Payment-Signature` header (base64-encoded JSON).
 
-Both versions follow the same flow. See [x402 v1 spec](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v1.md) and [v2 spec](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md).
+| Network | Header | Status |
+|---------|--------|--------|
+| EVM (Base) | `Payment-Signature` | ✓ |
+| Solana | `Payment-Signature` | ✓ |
+| Stacks | `Payment-Signature` | ✓ |
+
+See [x402 v2 spec](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md).
 
 ## Stacks Tokens
 

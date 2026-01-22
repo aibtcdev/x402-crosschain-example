@@ -188,10 +188,11 @@ Accept multiple tokens:
 ```typescript
 extra: {
   acceptedTokens: ["STX", "sBTC", "USDCx"],
+  tokenType: "STX",  // Default token
 }
 ```
 
-Clients specify which token via `X-PAYMENT-TOKEN-TYPE` header.
+With v2, the token type is embedded in the `extra.tokenType` field of the payment payload.
 
 ---
 
@@ -199,10 +200,10 @@ Clients specify which token via `X-PAYMENT-TOKEN-TYPE` header.
 
 | Version | Header | Status |
 |---------|--------|--------|
-| v1 | `X-PAYMENT` | Available now |
-| v2 | `Payment-Signature` | Coming soon |
+| v1 | `X-PAYMENT` | ✓ |
+| v2 | `Payment-Signature` | ✓ |
 
-When v2 ships, the middleware will handle both automatically.
+Both versions are supported. v2 uses a unified `Payment-Signature` header with base64-encoded JSON payload, matching the Coinbase x402 specification.
 
 ---
 
