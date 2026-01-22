@@ -137,8 +137,8 @@ app.get("/api/data", async (req, res, next) => {
 1. **Client requests** `/api/data`
 2. **Server returns 402** with both EVM and Stacks payment options
 3. **Client chooses** their network and signs a transaction
-4. **Client retries** with payment header (`Payment-Signature` for EVM, `X-PAYMENT` for Stacks)
-5. **Server routes** to the appropriate verifier
+4. **Client retries** with `Payment-Signature` header (v2 unified format)
+5. **Server decodes** payload and routes by network
 6. **Facilitator verifies** and settles the payment
 7. **Server returns** the data
 
@@ -148,7 +148,7 @@ Your EVM clients see nothing different - they still get their EVM option and pay
 
 ## Stacks Token Options
 
-Stacks supports multiple tokens. Clients specify via `X-PAYMENT-TOKEN-TYPE` header:
+Stacks supports multiple tokens. With v2, the token type is embedded in the `extra.tokenType` field of the payment payload:
 
 | Token | Description | Use Case |
 |-------|-------------|----------|
@@ -181,10 +181,10 @@ extra: {
 
 | Version | Header | EVM | Stacks |
 |---------|--------|-----|--------|
-| v1 | `X-PAYMENT` | Supported | Supported |
-| v2 | `Payment-Signature` | Supported | Coming soon |
+| v1 | `X-PAYMENT` | ✓ | ✓ |
+| v2 | `Payment-Signature` | ✓ | ✓ |
 
-Coinbase's `@x402/express` handles both. For Stacks, currently use `X-PAYMENT` (v1). When v2 ships for Stacks, the middleware will handle both automatically.
+Coinbase's `@x402/express` handles both versions. Stacks now supports v2 with the unified `Payment-Signature` header (base64-encoded JSON payload).
 
 ---
 
