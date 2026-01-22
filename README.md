@@ -47,8 +47,8 @@ accepts: [
   { scheme: "exact", network: "stacks:2147483648", asset: "STX", amount: "1000", ... }
 ]
 
-// 3. ROUTE by network (decode payload to check network prefix)
-const payload = decodePaymentSignature(paymentSignature);
+// 3. ROUTE by network (decode base64 JSON payload)
+const payload = JSON.parse(Buffer.from(paymentSignature, "base64").toString());
 if (payload.accepted.network.startsWith("stacks:")) {
   return stacksMiddleware(req, res, next);
 }
