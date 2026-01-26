@@ -4,39 +4,41 @@
  * Hono-native implementation of x402 v2 payment middleware for Stacks.
  * Uses the unified Payment-Signature header format matching @x402/core.
  *
- * v2 Changes from v1:
- * - Header: Payment-Signature (base64 JSON) instead of X-PAYMENT (raw hex)
- * - Token type: Embedded in payload.accepted.extra.tokenType instead of X-PAYMENT-TOKEN-TYPE header
- * - 402 response: Uses "amount" and separate "resource" object instead of "maxAmountRequired" inline
- * - Facilitator: /settle endpoint instead of /api/v1/settle
+ * Settlement is handled by x402-stacks X402PaymentVerifier.settle() which
+ * communicates with the facilitator using the correct v2 API format.
  *
  * Based on: https://github.com/aibtcdev/x402-api/blob/main/src/middleware/x402.ts
  */
 
 import type { Context, MiddlewareHandler } from "hono";
+import { X402PaymentVerifier } from "x402-stacks";
 import type { TokenType } from "x402-stacks";
 import {
   stacksConfig,
-  STACKS_NETWORK_IDS,
+  STACKS_NETWORKS,
+  X402_HEADERS,
   safeStringify,
   DEFAULT_ACCEPTED_TOKENS,
   DEFAULT_TIMEOUT_SECONDS,
   decodePaymentSignature,
   build402ResponseV2,
-  settleWithFacilitatorV2,
   type StacksPaymentOptions,
   type X402Context,
   type PaymentPayloadV2,
   type PaymentRequirementsV2,
+  type SettlementResponseV2,
 } from "../shared/stacks-config.js";
 
 // Re-export for use in index.ts
-export { stacksConfig, STACKS_NETWORK_IDS, build402ResponseV2 };
+export { stacksConfig, STACKS_NETWORKS, build402ResponseV2 };
 
 // Hono Variables type for x402 context
 export type X402Variables = {
   x402?: X402Context;
 };
+
+// Initialize the v2 verifier with facilitator URL
+const verifier = new X402PaymentVerifier(stacksConfig.facilitatorUrl);
 
 // =============================================================================
 // Middleware Factory
@@ -72,7 +74,7 @@ export function stacksPaymentMiddleware<
 
   return async (c, next) => {
     // v2: Use Payment-Signature header (base64 JSON)
-    const paymentSignature = c.req.header("payment-signature");
+    const paymentSignature = c.req.header(X402_HEADERS.PAYMENT_SIGNATURE);
 
     if (!paymentSignature) {
       // Return v2 402 response
@@ -144,10 +146,10 @@ export function stacksPaymentMiddleware<
     };
 
     try {
-      // v2: Call facilitator settle endpoint
-      const settleResult = await settleWithFacilitatorV2(
+      // v2: Settle via X402PaymentVerifier (handles facilitator API format)
+      const settleResult: SettlementResponseV2 = await verifier.settle(
         paymentPayload,
-        paymentRequirements
+        { paymentRequirements }
       );
 
       if (!settleResult.success) {
@@ -175,7 +177,7 @@ export function stacksPaymentMiddleware<
       c.set("x402", x402Context);
 
       // Add response headers
-      c.header("X-PAYMENT-RESPONSE", safeStringify(settleResult));
+      c.header(X402_HEADERS.PAYMENT_RESPONSE, safeStringify(settleResult));
       if (x402Context.payerAddress) {
         c.header("X-PAYER-ADDRESS", x402Context.payerAddress);
       }

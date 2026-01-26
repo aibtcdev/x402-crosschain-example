@@ -10,7 +10,7 @@
  * - Routing: Based on decoded payload's "network" field (CAIP-2 format)
  *
  * This is the Hono equivalent of the Express server in src/server/.
- * See docs/INTEGRATION_GUIDE.md for step-by-step integration instructions.
+ * See docs/FROM_EVM.md for step-by-step integration instructions.
  */
 
 import { Hono } from "hono";
@@ -31,7 +31,8 @@ import {
 } from "./middleware-evm.js";
 import { createWeatherResponse } from "../shared/mock-data.js";
 import {
-  STACKS_NETWORK_IDS,
+  STACKS_NETWORKS,
+  networkToCAIP2,
   DEFAULT_ACCEPTED_TOKENS,
   DEFAULT_TIMEOUT_SECONDS,
   decodePaymentSignature,
@@ -78,7 +79,7 @@ app.get("/", (c) => {
         facilitator: evmConfig.facilitatorUrl,
       },
       stacks: {
-        network: STACKS_NETWORK_IDS[stacksConfig.network],
+        network: networkToCAIP2(stacksConfig.network),
         payTo: stacksConfig.payTo || "not-configured",
         facilitator: stacksConfig.facilitatorUrl,
       },
@@ -206,7 +207,7 @@ app.get("/weather", async (c) => {
           // STACKS OPTION (STX)
           {
             scheme: "exact",
-            network: STACKS_NETWORK_IDS[stacksConfig.network], // "stacks:1" or "stacks:2147483648"
+            network: networkToCAIP2(stacksConfig.network), // CAIP-2: "stacks:1" or "stacks:2147483648"
             asset: "STX",
             amount: "1000", // Amount in microSTX
             payTo: stacksConfig.payTo,
@@ -220,7 +221,7 @@ app.get("/weather", async (c) => {
           // STACKS OPTION (sBTC)
           {
             scheme: "exact",
-            network: STACKS_NETWORK_IDS[stacksConfig.network],
+            network: networkToCAIP2(stacksConfig.network),
             asset: getAssetIdentifier("sBTC", stacksConfig.network),
             amount: "100", // Amount in satoshis
             payTo: stacksConfig.payTo,

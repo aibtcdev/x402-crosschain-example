@@ -10,7 +10,7 @@ x402 is a protocol for HTTP payments. Instead of API keys, clients pay per reque
 1. Client requests a resource
 2. Server returns 402 Payment Required with pricing
 3. Client signs a payment transaction
-4. Client retries with payment header
+4. Client retries with Payment-Signature header
 5. Server verifies payment and returns data
 ```
 
@@ -57,58 +57,59 @@ config();
 
 const app = express();
 
-// Initialize verifier
-const verifier = new X402PaymentVerifier({
-  network: process.env.STACKS_NETWORK || "testnet",
-  facilitatorUrl: process.env.STACKS_FACILITATOR_URL,
-  payTo: process.env.SERVER_ADDRESS_STACKS,
-});
+// Initialize v2 verifier (just needs facilitator URL)
+const verifier = new X402PaymentVerifier(
+  process.env.STACKS_FACILITATOR_URL
+);
 
 // Your paid endpoint
 app.get("/api/data", async (req, res) => {
-  const payment = req.header("x-payment");
+  const paymentSignature = req.header("payment-signature");
 
-  // No payment? Return 402 with requirements
-  if (!payment) {
+  // No payment? Return v2 402 with requirements
+  if (!paymentSignature) {
     return res.status(402).json({
-      x402Version: 1,
+      x402Version: 2,
       error: "Payment Required",
+      resource: {
+        url: req.path,
+        description: "API data access",
+        mimeType: "application/json",
+      },
       accepts: [
         {
           scheme: "exact",
           network: "stacks:2147483648",              // Testnet
-          maxAmountRequired: "1000",                 // 0.001 STX
+          amount: "1000",                            // 0.001 STX
           asset: "STX",
           payTo: process.env.SERVER_ADDRESS_STACKS,
-          resource: req.path,
-          description: "API data access",
           maxTimeoutSeconds: 300,
           extra: {
-            nonce: crypto.randomUUID(),
-            expiresAt: new Date(Date.now() + 300000).toISOString(),
+            facilitator: process.env.STACKS_FACILITATOR_URL,
             tokenType: "STX",
             acceptedTokens: ["STX"],
-            facilitator: process.env.STACKS_FACILITATOR_URL,
           },
         },
       ],
     });
   }
 
-  // Verify and settle payment
+  // Decode and settle payment via facilitator
   try {
-    const result = await verifier.verifyAndSettle({
-      signedTransaction: payment,
-      expectedAmount: 1000n,
-      tokenType: req.header("x-payment-token-type") || "STX",
+    const paymentPayload = JSON.parse(
+      Buffer.from(paymentSignature, "base64").toString("utf-8")
+    );
+
+    const result = await verifier.settle(paymentPayload, {
+      paymentRequirements: paymentPayload.accepted,
     });
 
     return res.json({
       data: "Your premium content here",
       payment: {
-        txId: result.txId,
-        tokenType: result.tokenType,
-        payer: result.payerAddress,
+        txId: result.transaction,
+        payer: result.payer,
+        network: result.network,
       },
     });
   } catch (error) {
@@ -129,9 +130,10 @@ curl http://localhost:3000/api/data
 
 # Response:
 # {
-#   "x402Version": 1,
+#   "x402Version": 2,
 #   "error": "Payment Required",
-#   "accepts": [{ "network": "stacks:2147483648", ... }]
+#   "resource": { "url": "/api/data", ... },
+#   "accepts": [{ "network": "stacks:2147483648", "amount": "1000", ... }]
 # }
 ```
 
@@ -139,25 +141,26 @@ curl http://localhost:3000/api/data
 
 ## Understanding the 402 Response
 
-The 402 response tells clients how to pay:
+The v2 402 response tells clients how to pay:
 
 ```json
 {
-  "x402Version": 1,
+  "x402Version": 2,
   "error": "Payment Required",
+  "resource": {
+    "url": "/api/data",
+    "description": "API access",
+    "mimeType": "application/json"
+  },
   "accepts": [
     {
       "scheme": "exact",
       "network": "stacks:1",
-      "maxAmountRequired": "1000",
+      "amount": "1000",
       "asset": "STX",
       "payTo": "SP2...",
-      "resource": "/api/data",
-      "description": "API access",
       "maxTimeoutSeconds": 300,
       "extra": {
-        "nonce": "uuid",
-        "expiresAt": "2024-01-01T00:00:00Z",
         "tokenType": "STX",
         "acceptedTokens": ["STX", "sBTC"],
         "facilitator": "https://facilitator.stacksx402.com"
@@ -168,8 +171,9 @@ The 402 response tells clients how to pay:
 ```
 
 Key fields:
+- `resource`: Describes the protected resource (URL, description, MIME type)
 - `network`: CAIP-2 chain ID (`stacks:1` mainnet, `stacks:2147483648` testnet)
-- `maxAmountRequired`: Amount in smallest unit (microSTX)
+- `amount`: Payment amount in smallest unit (microSTX)
 - `payTo`: Your wallet address
 - `extra.acceptedTokens`: Which tokens you accept
 
@@ -191,19 +195,6 @@ extra: {
   tokenType: "STX",  // Default token
 }
 ```
-
-With v2, the token type is embedded in the `extra.tokenType` field of the payment payload.
-
----
-
-## Protocol Versions
-
-| Version | Header | Status |
-|---------|--------|--------|
-| v1 | `X-PAYMENT` | ✓ |
-| v2 | `Payment-Signature` | ✓ |
-
-Both versions are supported. v2 uses a unified `Payment-Signature` header with base64-encoded JSON payload, matching the Coinbase x402 specification.
 
 ---
 
@@ -245,18 +236,19 @@ await fetch("https://x402-relay.aibtc.com/relay", {
 
 ## Building a Client
 
-Make requests to x402 endpoints:
+Make requests to x402 endpoints using the automatic flow:
 
 ```typescript
-import { X402PaymentClient } from "x402-stacks";
+import { createPaymentClient, privateKeyToAccount } from "x402-stacks";
 
-const client = new X402PaymentClient({
-  network: "testnet",
-  privateKey: process.env.STACKS_PRIVATE_KEY,
+const account = privateKeyToAccount(process.env.STACKS_PRIVATE_KEY!, "testnet");
+const client = createPaymentClient(account, {
+  baseURL: "https://api.example.com",
 });
 
-// Auto-handles 402 responses
-const data = await client.requestWithPayment("https://api.example.com/data");
+// Automatic v2 flow: handles 402 -> sign -> retry
+const response = await client.get("/data");
+console.log(response.data);
 ```
 
 Or manually:
@@ -265,12 +257,23 @@ Or manually:
 const response = await fetch(url);
 if (response.status === 402) {
   const requirements = await response.json();
-  const stacksOption = requirements.accepts.find(a => a.network.startsWith("stacks:"));
+  const stacksOption = requirements.accepts.find(
+    (a) => a.network.startsWith("stacks:")
+  );
 
   if (stacksOption) {
-    const signed = await client.signPayment(stacksOption);
+    // Sign and build v2 payload
+    const signed = await client.signPayment(v1FormatFromV2(stacksOption));
+    const payload = {
+      x402Version: 2,
+      resource: requirements.resource,
+      accepted: stacksOption,
+      payload: { transaction: signed.signedTransaction },
+    };
+    const header = Buffer.from(JSON.stringify(payload)).toString("base64");
+
     const paid = await fetch(url, {
-      headers: { "X-PAYMENT": signed.signedTransaction }
+      headers: { "Payment-Signature": header },
     });
   }
 }

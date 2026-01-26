@@ -2,23 +2,26 @@
  * Stacks Client Example (v2 Protocol)
  *
  * Demonstrates how to make x402 v2 payments using the Stacks network.
- * Shows the pattern for using the unified Payment-Signature header format.
- *
- * v2 Changes:
- * - Header: Payment-Signature (base64 JSON) instead of X-PAYMENT
- * - Token type: Embedded in payload instead of separate X-PAYMENT-TOKEN-TYPE header
- * - 402 response: Uses "amount" and "resource" object instead of "maxAmountRequired"
+ * Shows two patterns:
+ *   1. Manual flow: Full control over the v2 payment process
+ *   2. Auto flow: Uses createPaymentClient() for automatic 402 handling
  */
 
 import { config } from "dotenv";
-import { X402PaymentClient } from "x402-stacks";
-import type { NetworkType, TokenType, X402PaymentRequired } from "x402-stacks";
 import {
-  type PaymentRequiredV2,
-  type PaymentRequirementsV2,
-  type PaymentPayloadV2,
-  encodePaymentSignature,
-} from "../shared/stacks-config.js";
+  X402PaymentClient,
+  createPaymentClient,
+  privateKeyToAccount,
+  encodePaymentPayload,
+} from "x402-stacks";
+import type {
+  NetworkType,
+  TokenType,
+  PaymentRequiredV2,
+  PaymentRequirementsV2,
+  PaymentPayloadV2,
+} from "x402-stacks";
+import type { X402PaymentRequiredV1 as X402PaymentRequired } from "x402-stacks";
 
 config();
 
@@ -81,7 +84,7 @@ function caip2ToNetworkType(network: string): NetworkType {
 
 /**
  * Convert v2 payment requirements to v1 format for x402-stacks signing
- * The x402-stacks client still uses v1 format internally for signing
+ * The X402PaymentClient.signPayment() still uses v1 format internally
  */
 function convertToV1ForSigning(
   option: PaymentRequirementsV2,
@@ -99,13 +102,13 @@ function convertToV1ForSigning(
 }
 
 /**
- * Make a Stacks payment request (v2 Protocol)
+ * Make a Stacks payment request (v2 Protocol - Manual Flow)
  *
  * This demonstrates the full v2 flow:
- * 1. Request endpoint → Get 402 with v2 payment requirements
+ * 1. Request endpoint -> Get 402 with v2 payment requirements
  * 2. Find Stacks option from accepts[] array
- * 3. Sign payment transaction with x402-stacks
- * 4. Build v2 payload and base64 encode
+ * 3. Sign payment transaction with X402PaymentClient
+ * 4. Build v2 payload and base64 encode with encodePaymentPayload()
  * 5. Retry request with Payment-Signature header
  */
 async function makeStacksPaymentRequest(
@@ -171,7 +174,7 @@ async function makeStacksPaymentRequest(
   }
 
   try {
-    // Convert v2 to v1 format for x402-stacks signing
+    // Convert v2 to v1 format for X402PaymentClient signing
     const v1Format = convertToV1ForSigning(stacksOption, paymentRequired.resource);
     const signedPayment = await client.signPayment(v1Format);
 
@@ -186,8 +189,8 @@ async function makeStacksPaymentRequest(
       payload: { transaction: signedPayment.signedTransaction },
     };
 
-    // Base64 encode for header
-    const paymentSignature = encodePaymentSignature(paymentPayload);
+    // Base64 encode using x402-stacks helper
+    const paymentSignature = encodePaymentPayload(paymentPayload);
 
     // Step 3: Retry with Payment-Signature header
     console.log("[Stacks Client v2] Step 4: Retrying with Payment-Signature header...");
@@ -210,7 +213,7 @@ async function makeStacksPaymentRequest(
     }
 
     // Check for payment response header
-    const paymentResponse = paidResponse.headers.get("x-payment-response");
+    const paymentResponse = paidResponse.headers.get("payment-response");
     const payerAddress = paidResponse.headers.get("x-payer-address");
 
     if (paymentResponse) {
@@ -226,22 +229,29 @@ async function makeStacksPaymentRequest(
 }
 
 /**
- * Alternative: Use the requestWithPayment helper
+ * Alternative: Use createPaymentClient() for automatic v2 flow
  *
- * The X402PaymentClient has a built-in method that handles
- * the entire flow automatically. Note: This still uses v1 format
- * internally - for full v2 support, use the manual flow above.
+ * The x402-stacks v2 package provides createPaymentClient() which wraps
+ * an axios instance with automatic 402 handling. This handles the entire
+ * v2 flow (decode 402, sign, encode payload, retry) automatically.
  */
 async function makeStacksPaymentRequestSimple(endpoint: string) {
-  const client = createStacksClient();
+  const privateKey = STACKS_PRIVATE_KEY || STACKS_MNEMONIC;
 
-  if (!client) {
+  if (!privateKey) {
     console.log("[Stacks Client v2] No client configured");
     return null;
   }
 
-  // Note: This uses v1 internally - use manual flow for v2
-  return client.requestWithPayment(`${SERVER_URL}${endpoint}`);
+  // Create account and payment client (axios-based, automatic 402 handling)
+  const account = privateKeyToAccount(privateKey, STACKS_NETWORK);
+  const client = createPaymentClient(account, {
+    baseURL: SERVER_URL,
+  });
+
+  // Automatic v2 flow: handles 402 -> sign -> retry internally
+  const response = await client.get(endpoint);
+  return response.data;
 }
 
 // =============================================================================
@@ -299,47 +309,3 @@ async function main() {
 }
 
 main();
-
-/**
- * v2 Protocol Integration Patterns:
- *
- * 1. Manual v2 flow (shown above):
- *    - Full control over the payment process
- *    - Parse v2 402 response with "resource" and "accepts[]"
- *    - Build v2 PaymentPayloadV2 with signed transaction
- *    - Base64 encode and send in Payment-Signature header
- *
- * 2. v2 Payload Structure:
- *    ```typescript
- *    const paymentPayload: PaymentPayloadV2 = {
- *      x402Version: 2,
- *      resource: paymentRequired.resource,
- *      accepted: selectedOption,  // From accepts[] array
- *      payload: { transaction: signedTx },
- *    };
- *    const header = Buffer.from(JSON.stringify(paymentPayload)).toString("base64");
- *    ```
- *
- * 3. Finding Stacks option from cross-chain 402:
- *    ```typescript
- *    const stacksOption = paymentRequired.accepts.find(
- *      (opt) => opt.network.startsWith("stacks:")
- *    );
- *    ```
- *
- * 4. Converting v2 to v1 for x402-stacks signing:
- *    ```typescript
- *    const v1Format = {
- *      network: "testnet",  // Convert CAIP-2 to NetworkType
- *      maxAmountRequired: stacksOption.amount,  // v2 uses "amount"
- *      payTo: stacksOption.payTo,
- *      resource: resource.url,
- *      tokenType: stacksOption.extra?.tokenType || "STX",
- *      nonce: crypto.randomUUID(),
- *      expiresAt: new Date(...).toISOString(),
- *    };
- *    const signed = await client.signPayment(v1Format);
- *    ```
- *
- * See: https://www.npmjs.com/package/x402-stacks
- */

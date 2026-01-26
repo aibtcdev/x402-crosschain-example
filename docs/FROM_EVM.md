@@ -12,7 +12,7 @@ import { paymentMiddleware } from "@x402/express";
 app.get("/api/data", paymentMiddleware(routes, evmServer), handler);
 ```
 
-Or a custom implementation checking `Payment-Signature` or `X-PAYMENT` headers.
+Or a custom implementation checking `Payment-Signature` headers.
 
 ## What You'll Add
 
@@ -56,34 +56,35 @@ app.get("/api/data", paymentMiddleware(routes, evmServer), (req, res) => {
 ```typescript
 import { paymentMiddleware } from "@x402/express";
 import { X402PaymentVerifier } from "x402-stacks";
+import type { PaymentPayloadV2 } from "x402-stacks";
 
-// Initialize Stacks verifier
-const stacksVerifier = new X402PaymentVerifier({
-  network: process.env.STACKS_NETWORK || "mainnet",
-  facilitatorUrl: process.env.STACKS_FACILITATOR_URL,
-  payTo: process.env.SERVER_ADDRESS_STACKS,
-});
+// Initialize Stacks verifier (just needs facilitator URL)
+const stacksVerifier = new X402PaymentVerifier(
+  process.env.STACKS_FACILITATOR_URL
+);
 
 app.get("/api/data", async (req, res, next) => {
-  // Check for payment headers
-  const evmPayment = req.header("payment-signature");
-  const stacksPayment = req.header("x-payment");
+  // v2: Check for unified Payment-Signature header
+  const paymentSignature = req.header("payment-signature");
 
-  // No payment? Return 402 with both options
-  if (!evmPayment && !stacksPayment) {
+  // No payment? Return v2 402 with both options
+  if (!paymentSignature) {
     return res.status(402).json({
-      x402Version: 1,
+      x402Version: 2,
       error: "Payment Required",
+      resource: {
+        url: req.path,
+        description: "API data access",
+        mimeType: "application/json",
+      },
       accepts: [
         // Your existing EVM option
         {
           scheme: "exact",
           network: "eip155:8453",                    // Base mainnet
-          maxAmountRequired: "1000",
+          amount: "1000",
           asset: "eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
           payTo: process.env.SERVER_ADDRESS_EVM,
-          resource: req.path,
-          description: "API data access",
           maxTimeoutSeconds: 300,
           extra: { facilitator: "https://x402.org/facilitator" },
         },
@@ -91,33 +92,33 @@ app.get("/api/data", async (req, res, next) => {
         {
           scheme: "exact",
           network: "stacks:1",                       // Stacks mainnet
-          maxAmountRequired: "1000",                 // 0.001 STX
+          amount: "1000",                            // 0.001 STX
           asset: "STX",
           payTo: process.env.SERVER_ADDRESS_STACKS,
-          resource: req.path,
-          description: "API data access",
           maxTimeoutSeconds: 300,
           extra: {
-            nonce: crypto.randomUUID(),
-            expiresAt: new Date(Date.now() + 300000).toISOString(),
+            facilitator: process.env.STACKS_FACILITATOR_URL,
             tokenType: "STX",
             acceptedTokens: ["STX", "sBTC", "USDCx"],
-            facilitator: process.env.STACKS_FACILITATOR_URL,
           },
         },
       ],
     });
   }
 
-  // Route Stacks payments
-  if (stacksPayment && (stacksPayment.length > 500 || stacksPayment.startsWith("0x"))) {
+  // Decode payload to determine network
+  const decoded = JSON.parse(
+    Buffer.from(paymentSignature, "base64").toString("utf-8")
+  );
+  const isStacks = decoded.accepted?.network?.startsWith("stacks:");
+
+  // Route Stacks payments to verifier
+  if (isStacks) {
     try {
-      const result = await stacksVerifier.verifyAndSettle({
-        signedTransaction: stacksPayment,
-        expectedAmount: 1000n,
-        tokenType: req.header("x-payment-token-type") || "STX",
+      const result = await stacksVerifier.settle(decoded, {
+        paymentRequirements: decoded.accepted,
       });
-      return res.json({ data: "...", paidWith: "Stacks", txId: result.txId });
+      return res.json({ data: "...", paidWith: "Stacks", txId: result.transaction });
     } catch (error) {
       return res.status(402).json({ error: "Stacks payment failed" });
     }
@@ -135,9 +136,9 @@ app.get("/api/data", async (req, res, next) => {
 ## How It Works
 
 1. **Client requests** `/api/data`
-2. **Server returns 402** with both EVM and Stacks payment options
+2. **Server returns 402** with both EVM and Stacks payment options (v2 format)
 3. **Client chooses** their network and signs a transaction
-4. **Client retries** with `Payment-Signature` header (v2 unified format)
+4. **Client retries** with `Payment-Signature` header (base64-encoded JSON)
 5. **Server decodes** payload and routes by network
 6. **Facilitator verifies** and settles the payment
 7. **Server returns** the data
@@ -148,7 +149,7 @@ Your EVM clients see nothing different - they still get their EVM option and pay
 
 ## Stacks Token Options
 
-Stacks supports multiple tokens. With v2, the token type is embedded in the `extra.tokenType` field of the payment payload:
+Stacks supports multiple tokens. The token type is embedded in the `extra.tokenType` field of the payment payload:
 
 | Token | Description | Use Case |
 |-------|-------------|----------|
@@ -174,17 +175,6 @@ extra: {
 |---------|---------|---------|
 | Stacks | `stacks:1` | `stacks:2147483648` |
 | Base | `eip155:8453` | `eip155:84532` |
-
----
-
-## Protocol Versions
-
-| Version | Header | EVM | Stacks |
-|---------|--------|-----|--------|
-| v1 | `X-PAYMENT` | ✓ | ✓ |
-| v2 | `Payment-Signature` | ✓ | ✓ |
-
-Coinbase's `@x402/express` handles both versions. Stacks now supports v2 with the unified `Payment-Signature` header (base64-encoded JSON payload).
 
 ---
 

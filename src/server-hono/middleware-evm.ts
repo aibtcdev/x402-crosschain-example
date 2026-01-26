@@ -51,17 +51,20 @@ export function evmPaymentMiddleware<E extends { Variables: EvmX402Variables }>(
     if (!paymentHeader) {
       return c.json(
         {
-          x402Version: 1,
+          x402Version: 2,
           error: "Payment Required",
+          resource: {
+            url: c.req.path,
+            description,
+            mimeType: "application/json",
+          },
           accepts: [
             {
               scheme: "exact",
               network: evmConfig.network,
-              maxAmountRequired: amount,
+              amount,
               asset: evmConfig.asset,
               payTo: evmConfig.payTo,
-              resource: c.req.path,
-              description,
               maxTimeoutSeconds: 300,
               extra: {
                 facilitator: evmConfig.facilitatorUrl,
