@@ -41,7 +41,7 @@ npm run check         # TypeScript type checking
 
 - **middleware-evm.ts**: Simplified EVM payment middleware (demo; production would use `@x402/express`)
 
-- **middleware-stacks.ts**: v2 Stacks payment middleware. Decodes `Payment-Signature` header, calls facilitator `/settle` endpoint. Supports STX, sBTC, and USDCx tokens.
+- **middleware-stacks.ts**: v2 Stacks payment middleware. Decodes `Payment-Signature` header, settles via `X402PaymentVerifier.settle()`. Supports STX, sBTC, and USDCx tokens.
 
 ### Hono Server (`src/server-hono/`)
 
@@ -53,13 +53,13 @@ Hono implementation with identical functionality to Express. Based on [aibtcdev/
 
 ### Shared (`src/shared/`)
 
-- **stacks-config.ts**: v2 types, configuration, and helper functions for Stacks payments
+- **stacks-config.ts**: Re-exports v2 types/constants from `x402-stacks`, project-specific configuration, token contracts, and helper functions
 
 ### Client (`src/client/`)
 
 - **evm-client.ts**: EVM payment flow demo (production would use `wrapFetchWithPayment` from `@x402/fetch`)
 
-- **stacks-client.ts**: v2 Stacks payment flow. Parses v2 402 response, signs with `X402PaymentClient`, builds v2 payload, and sends `Payment-Signature` header.
+- **stacks-client.ts**: v2 Stacks payment flow. Manual flow (parse v2 402, sign, `encodePaymentPayload()`) and auto flow (`createPaymentClient()` with axios).
 
 ## x402 v2 Payment Flow
 
@@ -73,7 +73,7 @@ Hono implementation with identical functionality to Express. Based on [aibtcdev/
 
 ## Key Dependencies
 
-- `x402-stacks` - Stacks transaction signing (used with v2 protocol)
+- `x402-stacks` (v2) - Stacks v2 types, `X402PaymentVerifier.settle()`, `createPaymentClient()`, `encodePaymentPayload()`
 - `@x402/express`, `@x402/hono`, `@x402/fetch`, `@x402/evm` - v2 Coinbase x402 for EVM
 - `hono`, `@hono/node-server` - Hono framework
 

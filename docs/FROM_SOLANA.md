@@ -58,33 +58,33 @@ app.get("/api/data", solanaPaymentMiddleware(options), handler);
 ```typescript
 import { X402PaymentVerifier } from "x402-stacks";
 
-// Initialize Stacks verifier
-const stacksVerifier = new X402PaymentVerifier({
-  network: process.env.STACKS_NETWORK || "mainnet",
-  facilitatorUrl: process.env.STACKS_FACILITATOR_URL,
-  payTo: process.env.SERVER_ADDRESS_STACKS,
-});
+// Initialize Stacks verifier (just needs facilitator URL)
+const stacksVerifier = new X402PaymentVerifier(
+  process.env.STACKS_FACILITATOR_URL
+);
 
 app.get("/api/data", async (req, res, next) => {
-  // Check for payment headers
-  const v2Payment = req.header("payment-signature");
-  const v1Payment = req.header("x-payment");
+  // v2: Check for unified Payment-Signature header
+  const paymentSignature = req.header("payment-signature");
 
-  // No payment? Return 402 with both options
-  if (!v2Payment && !v1Payment) {
+  // No payment? Return v2 402 with both options
+  if (!paymentSignature) {
     return res.status(402).json({
-      x402Version: 1,
+      x402Version: 2,
       error: "Payment Required",
+      resource: {
+        url: req.path,
+        description: "API data access",
+        mimeType: "application/json",
+      },
       accepts: [
         // Your existing Solana option
         {
           scheme: "exact",
           network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",  // Mainnet
-          maxAmountRequired: "1000",
+          amount: "1000",
           asset: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/spl:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
           payTo: process.env.SERVER_ADDRESS_SOLANA,
-          resource: req.path,
-          description: "API data access",
           maxTimeoutSeconds: 300,
           extra: { facilitator: "https://x402.org/facilitator" },
         },
@@ -92,33 +92,33 @@ app.get("/api/data", async (req, res, next) => {
         {
           scheme: "exact",
           network: "stacks:1",                       // Stacks mainnet
-          maxAmountRequired: "1000",                 // 0.001 STX
+          amount: "1000",                            // 0.001 STX
           asset: "STX",
           payTo: process.env.SERVER_ADDRESS_STACKS,
-          resource: req.path,
-          description: "API data access",
           maxTimeoutSeconds: 300,
           extra: {
-            nonce: crypto.randomUUID(),
-            expiresAt: new Date(Date.now() + 300000).toISOString(),
+            facilitator: process.env.STACKS_FACILITATOR_URL,
             tokenType: "STX",
             acceptedTokens: ["STX", "sBTC", "USDCx"],
-            facilitator: process.env.STACKS_FACILITATOR_URL,
           },
         },
       ],
     });
   }
 
-  // Route Stacks payments (hex-encoded, longer than Solana base58)
-  if (v1Payment && (v1Payment.length > 500 || v1Payment.startsWith("0x"))) {
+  // Decode v2 payload to determine network
+  const decoded = JSON.parse(
+    Buffer.from(paymentSignature, "base64").toString("utf-8")
+  );
+  const isStacks = decoded.accepted?.network?.startsWith("stacks:");
+
+  // Route Stacks payments to verifier
+  if (isStacks) {
     try {
-      const result = await stacksVerifier.verifyAndSettle({
-        signedTransaction: v1Payment,
-        expectedAmount: 1000n,
-        tokenType: req.header("x-payment-token-type") || "STX",
+      const result = await stacksVerifier.settle(decoded, {
+        paymentRequirements: decoded.accepted,
       });
-      return res.json({ data: "...", paidWith: "Stacks", txId: result.txId });
+      return res.json({ data: "...", paidWith: "Stacks", txId: result.transaction });
     } catch (error) {
       return res.status(402).json({ error: "Stacks payment failed" });
     }
@@ -136,10 +136,10 @@ app.get("/api/data", async (req, res, next) => {
 ## How It Works
 
 1. **Client requests** `/api/data`
-2. **Server returns 402** with both Solana and Stacks payment options
+2. **Server returns 402** with both Solana and Stacks payment options (v2 format)
 3. **Client chooses** their network and signs a transaction
-4. **Client retries** with payment header
-5. **Server routes** to the appropriate verifier
+4. **Client retries** with `Payment-Signature` header (base64-encoded JSON)
+5. **Server decodes** payload and routes by network
 6. **Facilitator verifies** and settles the payment
 7. **Server returns** the data
 
@@ -149,19 +149,16 @@ Your Solana clients see nothing different - they still get their Solana option a
 
 ## Distinguishing Stacks from Solana Payments
 
-Both can use the `X-PAYMENT` header (v1), so you need to tell them apart:
-
-| Network | Payload Format |
-|---------|----------------|
-| Solana | Base58 encoded, ~400-600 chars |
-| Stacks | Hex encoded (`0x...`), 500+ chars |
-
-Detection:
+With v2, all networks use the `Payment-Signature` header (base64-encoded JSON). The `accepted.network` field identifies the chain:
 
 ```typescript
-if (v1Payment && (v1Payment.startsWith("0x") || v1Payment.length > 500)) {
+const decoded = JSON.parse(
+  Buffer.from(paymentSignature, "base64").toString("utf-8")
+);
+
+if (decoded.accepted?.network?.startsWith("stacks:")) {
   // Stacks payment
-} else {
+} else if (decoded.accepted?.network?.startsWith("solana:")) {
   // Solana payment
 }
 ```
@@ -170,7 +167,7 @@ if (v1Payment && (v1Payment.startsWith("0x") || v1Payment.length > 500)) {
 
 ## Stacks Token Options
 
-Stacks supports multiple tokens. With v2, the token type is embedded in the `extra.tokenType` field:
+Stacks supports multiple tokens. The token type is embedded in the `extra.tokenType` field:
 
 | Token | Description | Use Case |
 |-------|-------------|----------|
@@ -195,17 +192,6 @@ extra: {
 |---------|---------|---------|
 | Stacks | `stacks:1` | `stacks:2147483648` |
 | Solana | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` |
-
----
-
-## Protocol Versions
-
-| Version | Header | Solana | Stacks |
-|---------|--------|--------|--------|
-| v1 | `X-PAYMENT` | ✓ | ✓ |
-| v2 | `Payment-Signature` | ✓ | ✓ |
-
-Both PayAI's `x402-solana` and Solana Foundation's `x402-next` handle both versions. Stacks now supports v2 with the unified `Payment-Signature` header (base64-encoded JSON payload).
 
 ---
 

@@ -3,9 +3,47 @@
  *
  * Common configuration and types used by both Express and Hono middleware.
  * This avoids duplication between the two server implementations.
+ *
+ * Types, constants, and helpers from x402-stacks v2 are re-exported here
+ * so middleware and client files import from a single location.
  */
 
 import type { NetworkType, TokenType, TokenContract } from "x402-stacks";
+import {
+  STACKS_NETWORKS,
+  X402_HEADERS,
+  networkToCAIP2,
+  networkFromCAIP2,
+  assetToV2,
+  encodePaymentPayload,
+} from "x402-stacks";
+import type {
+  ResourceInfo,
+  PaymentRequirementsV2,
+  PaymentRequiredV2,
+  PaymentPayloadV2,
+  SettlementResponseV2,
+} from "x402-stacks";
+
+// Re-export x402-stacks v2 types and constants for use by middleware/client
+export type {
+  ResourceInfo,
+  PaymentRequirementsV2,
+  PaymentRequiredV2,
+  PaymentPayloadV2,
+  SettlementResponseV2,
+};
+export {
+  STACKS_NETWORKS,
+  X402_HEADERS,
+  networkToCAIP2,
+  networkFromCAIP2,
+  assetToV2,
+  encodePaymentPayload,
+};
+
+// Re-export v1 types still needed by client
+export type { NetworkType, TokenType, TokenContract };
 
 // =============================================================================
 // Configuration
@@ -16,13 +54,6 @@ export const stacksConfig = {
   payTo: process.env.SERVER_ADDRESS_STACKS || "",
   facilitatorUrl:
     process.env.STACKS_FACILITATOR_URL || "https://facilitator.stacksx402.com",
-};
-
-// CAIP-2 network identifiers for Stacks
-// See: https://github.com/coinbase/x402/pull/962
-export const STACKS_NETWORK_IDS: Record<NetworkType, string> = {
-  mainnet: "stacks:1",
-  testnet: "stacks:2147483648",
 };
 
 // Token contracts for sBTC and USDCx
@@ -51,65 +82,6 @@ export const TOKEN_CONTRACTS: Record<
     },
   },
 };
-
-// =============================================================================
-// Types - v2 Protocol (matching @x402/core specification)
-// =============================================================================
-
-/**
- * Resource information for v2 402 response
- */
-export interface ResourceInfo {
-  url: string;
-  description: string;
-  mimeType: string;
-}
-
-/**
- * Payment requirements in v2 format (from @x402/core)
- */
-export interface PaymentRequirementsV2 {
-  scheme: string;
-  network: string; // CAIP-2: "stacks:1" or "stacks:2147483648"
-  asset: string;
-  amount: string;
-  payTo: string;
-  maxTimeoutSeconds: number;
-  extra: Record<string, unknown>;
-}
-
-/**
- * 402 Response body in v2 format
- */
-export interface PaymentRequiredV2 {
-  x402Version: number;
-  error?: string;
-  resource: ResourceInfo;
-  accepts: PaymentRequirementsV2[];
-  extensions?: Record<string, unknown>;
-}
-
-/**
- * Payment payload sent in Payment-Signature header (v2)
- */
-export interface PaymentPayloadV2 {
-  x402Version: number;
-  resource: ResourceInfo;
-  accepted: PaymentRequirementsV2;
-  payload: Record<string, unknown>;
-  extensions?: Record<string, unknown>;
-}
-
-/**
- * Facilitator settle response (v2)
- */
-export interface FacilitatorSettleResponseV2 {
-  success: boolean;
-  errorReason?: string;
-  payer?: string;
-  transaction: string;
-  network: string;
-}
 
 // =============================================================================
 // Types - Middleware Configuration
@@ -200,13 +172,6 @@ export function decodePaymentSignature(header: string): PaymentPayloadV2 {
 }
 
 /**
- * Encode payment payload to Payment-Signature header (v2 format)
- */
-export function encodePaymentSignature(payload: PaymentPayloadV2): string {
-  return Buffer.from(JSON.stringify(payload)).toString("base64");
-}
-
-/**
  * Build v2 402 response
  */
 export interface Build402ResponseV2Options {
@@ -238,7 +203,7 @@ export function build402ResponseV2(
     },
     accepts: acceptTokens.map((tokenType) => ({
       scheme: "exact",
-      network: STACKS_NETWORK_IDS[stacksConfig.network],
+      network: networkToCAIP2(stacksConfig.network),
       asset: getAssetIdentifier(tokenType, stacksConfig.network),
       amount: amount.toString(),
       payTo: stacksConfig.payTo,
@@ -250,29 +215,4 @@ export function build402ResponseV2(
       },
     })),
   };
-}
-
-/**
- * Call v2 facilitator settle endpoint
- */
-export async function settleWithFacilitatorV2(
-  paymentPayload: PaymentPayloadV2,
-  paymentRequirements: PaymentRequirementsV2
-): Promise<FacilitatorSettleResponseV2> {
-  const response = await fetch(`${stacksConfig.facilitatorUrl}/settle`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      x402Version: 2,
-      paymentPayload,
-      paymentRequirements,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Facilitator settle failed: ${response.status} - ${error}`);
-  }
-
-  return response.json();
 }

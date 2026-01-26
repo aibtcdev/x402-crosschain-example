@@ -62,20 +62,26 @@ evmPaymentMiddleware.use((req, res, next) => {
     }
 
     return res.status(402).json({
-      x402Version: 1,
+      x402Version: 2,
+      error: "Payment Required",
+      resource: {
+        url: req.originalUrl,
+        description: routeConfig.config.description,
+        mimeType: "application/json",
+      },
       accepts: [
         {
           scheme: "exact",
           network: evmConfig.network,
-          maxAmountRequired: routeConfig.price === "$0.001" ? "1000" : "10000",
-          resource: req.originalUrl,
-          description: routeConfig.config.description,
-          payTo: evmConfig.payTo,
+          amount: routeConfig.price === "$0.001" ? "1000" : "10000",
           asset: evmConfig.asset,
+          payTo: evmConfig.payTo,
+          maxTimeoutSeconds: 300,
+          extra: {
+            facilitator: evmConfig.facilitatorUrl,
+          },
         },
       ],
-      error: "Payment Required",
-      message: "X-Payment header with signed transaction required",
     });
   }
 
