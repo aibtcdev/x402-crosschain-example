@@ -77,8 +77,8 @@ export const TOKEN_CONTRACTS: Record<
       name: "sbtc-token",
     },
     USDCx: {
-      address: "ST1NXBK3K5YYMD6FD41MVNP3JS1GABZ8TRVX023PT",
-      name: "token-susdc",
+      address: "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
+      name: "usdcx",
     },
   },
 };
