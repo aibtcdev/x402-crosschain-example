@@ -159,6 +159,179 @@ export const DEFAULT_ACCEPTED_TOKENS: TokenType[] = ["STX", "sBTC", "USDCx"];
  */
 export const DEFAULT_TIMEOUT_SECONDS = 300;
 
+/**
+ * Token decimals for amount conversion
+ */
+export const TOKEN_DECIMALS: Record<TokenType, number> = {
+  STX: 6,
+  sBTC: 8,
+  USDCx: 6,
+};
+
+// =============================================================================
+// Amount Conversion Helpers
+// =============================================================================
+
+/**
+ * Convert human-readable amount to base units (e.g., "1.5" STX → "1500000" microSTX)
+ */
+export function toBaseUnits(amount: string, token: TokenType): string {
+  const decimals = TOKEN_DECIMALS[token];
+  const [whole, fraction = ""] = amount.split(".");
+  const paddedFraction = fraction.padEnd(decimals, "0").slice(0, decimals);
+  const baseUnits = BigInt(whole + paddedFraction);
+  return baseUnits.toString();
+}
+
+/**
+ * Convert base units to human-readable amount (e.g., "1500000" microSTX → "1.5" STX)
+ */
+export function fromBaseUnits(baseUnits: string, token: TokenType): string {
+  const decimals = TOKEN_DECIMALS[token];
+  const value = baseUnits.padStart(decimals + 1, "0");
+  const whole = value.slice(0, -decimals) || "0";
+  const fraction = value.slice(-decimals).replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
+// =============================================================================
+// Payment Option Builders
+// =============================================================================
+
+export interface CreatePaymentOptionParams {
+  payTo: string;
+  amount: string;
+  token: TokenType;
+  network: NetworkType;
+  maxTimeoutSeconds?: number;
+  facilitatorUrl?: string;
+}
+
+/**
+ * Create a single payment option for a specific token
+ *
+ * @example
+ * ```typescript
+ * const option = createPaymentOption({
+ *   payTo: "SP2...",
+ *   amount: "0.001",  // Human-readable
+ *   token: "STX",
+ *   network: "mainnet",
+ * });
+ * ```
+ */
+export function createPaymentOption(
+  params: CreatePaymentOptionParams
+): PaymentRequirementsV2 {
+  const {
+    payTo,
+    amount,
+    token,
+    network,
+    maxTimeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
+    facilitatorUrl = stacksConfig.facilitatorUrl,
+  } = params;
+
+  return {
+    scheme: "exact",
+    network: networkToCAIP2(network),
+    asset: getAssetIdentifier(token, network),
+    amount: toBaseUnits(amount, token),
+    payTo,
+    maxTimeoutSeconds,
+    extra: {
+      facilitator: facilitatorUrl,
+      tokenType: token,
+      acceptedTokens: [token],
+    },
+  };
+}
+
+export interface CreateStacksTokenOptionsParams {
+  payTo: string;
+  network: NetworkType;
+  /** STX amount in human-readable format (e.g., "0.001") */
+  stxAmount?: string;
+  /** sBTC amount in human-readable format (e.g., "0.00001") */
+  sbtcAmount?: string;
+  /** USDCx amount in human-readable format (e.g., "0.01") */
+  usdcxAmount?: string;
+  maxTimeoutSeconds?: number;
+  facilitatorUrl?: string;
+}
+
+/**
+ * Create payment options for multiple Stacks tokens at once
+ *
+ * @example
+ * ```typescript
+ * const options = createStacksTokenOptions({
+ *   payTo: "SP2...",
+ *   network: "mainnet",
+ *   stxAmount: "0.001",
+ *   sbtcAmount: "0.00001",
+ *   usdcxAmount: "0.01",
+ * });
+ * // Returns array of PaymentRequirementsV2 for each specified token
+ * ```
+ */
+export function createStacksTokenOptions(
+  params: CreateStacksTokenOptionsParams
+): PaymentRequirementsV2[] {
+  const {
+    payTo,
+    network,
+    stxAmount,
+    sbtcAmount,
+    usdcxAmount,
+    maxTimeoutSeconds,
+    facilitatorUrl,
+  } = params;
+
+  const options: PaymentRequirementsV2[] = [];
+
+  if (stxAmount) {
+    options.push(
+      createPaymentOption({
+        payTo,
+        amount: stxAmount,
+        token: "STX",
+        network,
+        maxTimeoutSeconds,
+        facilitatorUrl,
+      })
+    );
+  }
+
+  if (sbtcAmount) {
+    options.push(
+      createPaymentOption({
+        payTo,
+        amount: sbtcAmount,
+        token: "sBTC",
+        network,
+        maxTimeoutSeconds,
+        facilitatorUrl,
+      })
+    );
+  }
+
+  if (usdcxAmount) {
+    options.push(
+      createPaymentOption({
+        payTo,
+        amount: usdcxAmount,
+        token: "USDCx",
+        network,
+        maxTimeoutSeconds,
+        facilitatorUrl,
+      })
+    );
+  }
+
+  return options;
+}
+
 // =============================================================================
 // v2 Helper Functions
 // =============================================================================
