@@ -1,6 +1,6 @@
 {
   "name": "x402-crosschain-example",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Cross-chain x402 payment example supporting EVM (Base) and Stacks networks",
   "type": "module",
   "scripts": {
