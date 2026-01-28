@@ -53,7 +53,10 @@ Hono implementation with identical functionality to Express. Based on [aibtcdev/
 
 ### Shared (`src/shared/`)
 
-- **stacks-config.ts**: Re-exports v2 types/constants from `x402-stacks`, project-specific configuration, token contracts, and helper functions
+- **stacks-config.ts**: Re-exports v2 types/constants from `x402-stacks`, project-specific configuration, token contracts, and helper functions:
+  - `toBaseUnits()` / `fromBaseUnits()` - Amount conversion (e.g., "1.5" STX ↔ "1500000" microSTX)
+  - `createPaymentOption()` - Build a single payment option for a token
+  - `createStacksTokenOptions()` - Build payment options for multiple tokens at once
 
 ### Client (`src/client/`)
 
@@ -178,6 +181,8 @@ Tokens configured in `stacks-config.ts` with mainnet/testnet contracts. Token ty
 - [Add Stacks to EVM](docs/FROM_EVM.md) - For Base developers
 - [Add Stacks to Solana](docs/FROM_SOLANA.md) - For Solana developers
 - [Getting Started](docs/GETTING_STARTED.md) - Build Stacks x402 from scratch
+- [Self-Hosting](docs/SELF_HOSTING.md) - Run your own facilitator
 - [x402-stacks NPM](https://www.npmjs.com/package/x402-stacks) - TypeScript client/server
-- [Stacks Facilitator](https://github.com/x402Stacks/x402-stacks-facilitator) - Payment verification
+- [x402-stacks-facilitator](https://github.com/x402Stacks/x402-stacks-facilitator) - Lightweight Go facilitator
+- [OpenFacilitator](https://github.com/rawgroundbeef/OpenFacilitator) - Multi-network platform with dashboard
 - [Sponsor Relay](https://github.com/aibtcdev/x402-sponsor-relay) - Gasless transactions for Stacks

@@ -9,6 +9,7 @@ Add **Stacks payment support** to your existing x402 app. Whether you're on **EV
 | EVM/Base app with `@x402/express` | [Add Stacks to EVM](docs/FROM_EVM.md) |
 | Solana app with `x402-solana` or `x402-next` | [Add Stacks to Solana](docs/FROM_SOLANA.md) |
 | Nothing yet, starting fresh | [Getting Started with Stacks x402](docs/GETTING_STARTED.md) |
+| Need your own facilitator | [Self-Hosting Guide](docs/SELF_HOSTING.md) |
 
 ## Quick Start
 
@@ -83,6 +84,10 @@ See [x402 v2 spec](https://github.com/coinbase/x402/blob/main/specs/x402-specifi
 - [Stacks Facilitator](https://facilitator.stacksx402.com) - Payment verification
 - [Stacks x402 Spec](https://github.com/aibtcdev/x402/blob/feature/add-stacks-ecosystem/specs/schemes/exact/scheme_exact_stacks.md)
 - [Sponsor Relay](https://github.com/aibtcdev/x402-sponsor-relay) - Gasless transactions
+
+### Self-Hosted Facilitators
+- [x402-stacks-facilitator](https://github.com/x402Stacks/x402-stacks-facilitator) - Lightweight Go facilitator
+- [OpenFacilitator](https://github.com/rawgroundbeef/OpenFacilitator) - Multi-network platform with dashboard
 
 ### x402 Protocol
 - [x402.org](https://x402.org) - Protocol home
